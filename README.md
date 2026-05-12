@@ -1,98 +1,104 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# PrestaMesta Backend - Manual de Entorno de Desarrollo con Docker
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Este repositorio contiene el núcleo lógico (API REST) del sistema de préstamos **PrestaMesta**, desarrollado con **NestJS 11** y **PostgreSQL 16**.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+---
 
-## Description
+## 📋 1. Requisitos Previos
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Asegúrate de tener instalados los siguientes componentes:
+- **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** (Asegúrate de que el motor esté encendido/verde antes de empezar).
+- **Node.js** (Opcional, para generar el `package-lock.json` inicial).
+- **Gestor de BD** (Recomendado: DBeaver o PgAdmin) para visualizar las tablas.
 
-## Project setup
+---
 
-```bash
-$ pnpm install
-```
+## 📂 2. Estructura de la Arquitectura Docker
 
-## Compile and run the project
+El entorno se compone de dos servicios principales orquestados por Docker Compose:
+
+1.  **`backend-dev`**: El servidor NestJS que corre en el puerto `3000`. Tiene activado el *Hot Reload* a través de volúmenes.
+2.  **`db`**: Una instancia de PostgreSQL 16 que corre en el puerto `5432`. Los datos son persistentes gracias al volumen `pgdata`.
+
+---
+
+## ⚙️ 3. Instrucciones de Arranque Paso a Paso
+
+### Paso 1: Generar el archivo de bloqueo (Solo si no existe)
+Si acabas de clonar el repo y no ves el archivo `package-lock.json`, ejecútalo localmente una vez:
 
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+npm install
 ```
 
-## Run tests
+### Paso 2: Levantar los servicios
+
+Ejecuta el siguiente comando en la raíz del proyecto para construir las imágenes y levantar los contenedores en segundo plano:
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+docker compose up -d --build
 ```
 
-## Deployment
+### Paso 3: Verificar que el servidor inició correctamente
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Como usamos la bandera -d, el servidor corre en el fondo. Para ver los registros (logs) de NestJS en tiempo real, usa:
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+docker compose logs -f backend-dev
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Si ves el mensaje [NestApplication] Nest application successfully started, todo está listo.
 
-## Resources
+---
 
-Check out a few resources that may come in handy when working with NestJS:
+## 4. Puntos de Acceso
+API (Backend)
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+    URL Local: http://localhost:3000
 
-## Support
+    Hot Reload: Cualquier cambio que guardes en los archivos .ts de la carpeta src reiniciará el servidor automáticamente dentro del contenedor.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+Base de Datos (PostgreSQL)
 
-## Stay in touch
+Para conectar tu gestor de base de datos favorito, usa estas credenciales:
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+    Host: localhost
 
-## License
+    Puerto: 5432
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+    Usuario: root
+
+    Contraseña: rootpassword
+
+    Base de Datos: prestamesta_db
+
+---
+
+## 5. Comandos Útiles
+
+Detener el entorno:
+
+```bash
+docker compose stop
+```
+
+Eliminar contenedores y red (limpieza profunda):
+
+```bash
+docker compose down
+```
+
+Reinstalar dependencias tras un git pull:
+Si un compañero agregó librerías nuevas al package.json, haz un pull y luego:
+
+```bash
+docker compose up -d --build
+```
+
+--- 
+
+6. Notas de Arquitectura y Seguridad
+
+    Seguridad Informática: Las credenciales en el archivo docker-compose.yml son exclusivas para desarrollo local. En producción, se utilizarán Variables de Entorno Secretas.
+
+    Persistencia: No borres el volumen pgdata a menos que quieras limpiar toda la base de datos y empezar de cero.

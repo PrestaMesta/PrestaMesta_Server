@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: presta-mesta-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: prestamesta_db
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: rootpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  backend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: presta-mesta-backend-dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=root
+      - DB_PASSWORD=rootpassword
+      - DB_NAME=prestamesta_db
+      - DATABASE_URL=postgresql://root:rootpassword@db:5432/prestamesta_db?schema=public
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
