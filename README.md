@@ -23,3 +23,22 @@ JSON
   "email": "admin@prestamesta.com",
   "password": "AdminSuperSeguro123"
 }
+
+Registro Cliente
+
+Registro (POST http://localhost:3000/api/auth/register)
+
+JSON
+{
+  "nombre": "Juan Pérez",
+  "email": "juan@example.com",
+  "password": "miPasswordSeguro123",
+  "telefono": "8711234567"
+}
+Login (POST http://localhost:3000/api/auth/login)
+
+JSON
+{
+  "email": "juan@example.com",
+  "password": "miPasswordSeguro123"
+}
