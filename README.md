@@ -42,3 +42,7 @@ JSON
   "email": "juan@example.com",
   "password": "miPasswordSeguro123"
 }
+
+
+Para mas ejemplos la documentacion de APis esta aqui:
+https://docs.google.com/document/d/1JGsfgmaGnCulp4J1vSX1TzFVm0CMj9c3xheSS1GbKw8/edit?tab=t.0
