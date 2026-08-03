@@ -1,26 +1,48 @@
-const jwt = require('jsonwebtoken');
+const { verifyClienteToken, verifyAdminToken, verifyAnyToken } = require('../utils/jwt');
+const AppError = require('../utils/AppError');
 
-// Verificar token en general
-exports.verificarToken = (req, res, next) => {
+function extraerToken(req) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Format: "Bearer TOKEN"
+  const token = authHeader && authHeader.split(' ')[1]; // Formato: "Bearer TOKEN"
+  if (!token) {
+    throw new AppError(401, 'TOKEN_INVALID', 'Acceso denegado. Token no proporcionado.');
+  }
+  return token;
+}
 
-  if (!token) return res.status(401).json({ mensaje: 'Acceso denegado. Token no proporcionado.' });
-
+// Exige un token de CLIENTE (audiencia env.JWT_AUD_CLIENTE). Un token administrativo,
+// aunque tenga firma valida, es rechazado aqui porque su audiencia no coincide.
+function verificarTokenCliente(req, res, next) {
   try {
-    const verificado = jwt.verify(token, process.env.JWT_SECRET);
-    req.usuario = verificado;
+    req.usuario = verifyClienteToken(extraerToken(req));
     next();
   } catch (error) {
-    res.status(403).json({ mensaje: 'Token inválido o expirado.' });
+    next(error);
   }
-};
+}
 
-// Verificar si es Admin
-exports.esAdmin = (req, res, next) => {
-  if (req.usuario && req.usuario.tipoUsuario === 'ADMIN') {
+// Exige un token de ADMIN (audiencia env.JWT_AUD_ADMIN). Solo confirma lo que dice el
+// JWT (tipoUsuario/rol en el momento en que se emitio el token); para acciones sensibles
+// se debe encadenar ademas middleware/cargarAdministradorActual.js, que relee rol/activo
+// directo de la base de datos.
+function verificarTokenAdmin(req, res, next) {
+  try {
+    req.usuario = verifyAdminToken(extraerToken(req));
     next();
-  } else {
-    res.status(403).json({ mensaje: 'Acceso restringido solo para administradores.' });
+  } catch (error) {
+    next(error);
   }
-};
+}
+
+// Unico uso: GET /prestamos/creditos, el unico endpoint leido tanto por clientes como por
+// administradores. Acepta cualquiera de las dos audiencias conocidas.
+function verificarTokenClienteOAdmin(req, res, next) {
+  try {
+    req.usuario = verifyAnyToken(extraerToken(req));
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { verificarTokenCliente, verificarTokenAdmin, verificarTokenClienteOAdmin };

@@ -13,14 +13,6 @@ const {
   AlignmentType
 } = require('docx');
 
-// Estilos de bordes para tablas y cajas
-const noBorders = {
-  top: { style: BorderStyle.NONE },
-  bottom: { style: BorderStyle.NONE },
-  left: { style: BorderStyle.NONE },
-  right: { style: BorderStyle.NONE }
-};
-
 const boxBorder = {
   top: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
   bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
@@ -95,7 +87,7 @@ const doc = new Document({
         new Paragraph({
           children: [
             new TextRun({
-              text: 'A continuación se presenta el catálogo completo de endpoints desarrollados para el sistema financiero Prestamesta, incluyendo autenticación (clientes y administradores) y la gestión del catálogo de créditos y solicitudes de préstamos.',
+              text: 'Catálogo de endpoints de Prestamesta bajo el prefijo /api/v1. Los tokens JWT de cliente y administrador usan audiencias distintas (prestamesta-client / prestamesta-admin): un token de un dominio nunca es aceptado por rutas del otro dominio. El contrato completo y verificable está en openapi.yaml (fuente de verdad, validada con npm run docs:validate).',
               italic: true,
               size: 20
             })
@@ -105,9 +97,9 @@ const doc = new Document({
 
         // SECCIÓN 1: AUTENTICACIÓN DE CLIENTES
         new Paragraph({ text: '1. Módulo Autenticación de Clientes', heading: HeadingLevel.HEADING_2, spacing: { before: 200, after: 100 } }),
-        
+
         // 1.1 Registro Cliente
-        createEndpointHeader('POST', '/api/client/auth/register'),
+        createEndpointHeader('POST', '/api/v1/client/auth/register'),
         new Paragraph({ text: 'Permite registrar un nuevo cliente en el sistema (MySQL).' }),
         new Paragraph({ text: 'Body Request (JSON):', bold: true, spacing: { before: 100 } }),
         createCodeBlock(`{\n  "nombre": "Juan Pérez",\n  "email": "juan@example.com",\n  "password": "miPasswordSeguro123",\n  "telefono": "8711234567"\n}`),
@@ -115,38 +107,50 @@ const doc = new Document({
         createCodeBlock(`{\n  "mensaje": "Cliente registrado exitosamente",\n  "clienteId": 1\n}`),
 
         // 1.2 Login Cliente
-        createEndpointHeader('POST', '/api/client/auth/login'),
-        new Paragraph({ text: 'Autentica a un cliente y devuelve su Token JWT.' }),
+        createEndpointHeader('POST', '/api/v1/client/auth/login'),
+        new Paragraph({ text: 'Autentica a un cliente y devuelve su Token JWT (audiencia prestamesta-client).' }),
         new Paragraph({ text: 'Body Request (JSON):', bold: true, spacing: { before: 100 } }),
         createCodeBlock(`{\n  "email": "juan@example.com",\n  "password": "miPasswordSeguro123"\n}`),
         new Paragraph({ text: 'Respuesta Exitosa (200 OK):', bold: true, spacing: { before: 100 } }),
         createCodeBlock(`{\n  "mensaje": "Autenticación exitosa",\n  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",\n  "cliente": {\n    "id": 1,\n    "nombre": "Juan Pérez",\n    "email": "juan@example.com"\n  }\n}`),
 
-        // SECCIÓN 2: AUTENTICACIÓN DE ADMINISTRADORES
-        new Paragraph({ text: '2. Módulo Autenticación de Administradores', heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }),
+        // SECCIÓN 2: AUTENTICACIÓN Y GESTIÓN DE ADMINISTRADORES
+        new Paragraph({ text: '2. Módulo de Administradores', heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: 'Solo existen los roles SUPERADMIN, ANALISTA y COBRADOR. El primer SUPERADMIN se crea únicamente con el script offline "npm run seed:superadmin" (nunca vía HTTP sin autenticar).',
+              italic: true,
+              size: 20
+            })
+          ],
+          spacing: { after: 150 }
+        }),
 
-        // 2.1 Registro Admin
-        createEndpointHeader('POST', '/api/admin/auth/register'),
-        new Paragraph({ text: 'Permite registrar un usuario administrador con asignación de rol.' }),
-        new Paragraph({ text: 'Body Request (JSON):', bold: true, spacing: { before: 100 } }),
-        createCodeBlock(`{\n  "nombre": "Admin Principal",\n  "email": "admin@prestamesta.com",\n  "password": "AdminSuperSeguro123",\n  "rol": "SUPERADMIN"\n}`),
-        new Paragraph({ text: 'Respuesta Exitosa (201 Created):', bold: true, spacing: { before: 100 } }),
-        createCodeBlock(`{\n  "mensaje": "Administrador creado exitosamente",\n  "adminId": 1,\n  "rol": "SUPERADMIN"\n}`),
-
-        // 2.2 Login Admin
-        createEndpointHeader('POST', '/api/admin/auth/login'),
-        new Paragraph({ text: 'Autentica a un administrador y genera su Token JWT con permisos.' }),
+        // 2.1 Login Admin
+        createEndpointHeader('POST', '/api/v1/admin/auth/login'),
+        new Paragraph({ text: 'Autentica a un administrador y genera su Token JWT (audiencia prestamesta-admin), con permisos según su rol.' }),
         new Paragraph({ text: 'Body Request (JSON):', bold: true, spacing: { before: 100 } }),
         createCodeBlock(`{\n  "email": "admin@prestamesta.com",\n  "password": "AdminSuperSeguro123"\n}`),
         new Paragraph({ text: 'Respuesta Exitosa (200 OK):', bold: true, spacing: { before: 100 } }),
         createCodeBlock(`{\n  "mensaje": "Autenticación de administrador exitosa",\n  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",\n  "admin": {\n    "id": 1,\n    "nombre": "Admin Principal",\n    "email": "admin@prestamesta.com",\n    "rol": "SUPERADMIN"\n  }\n}`),
 
+        // 2.2 Crear administrador
+        createEndpointHeader('POST', '/api/v1/admin/administradores'),
+        new Paragraph({ text: 'Crea un nuevo administrador. Requiere un token de administrador cuyo rol, releído directamente de la base de datos, sea SUPERADMIN. No es un endpoint de autenticación pública.' }),
+        new Paragraph({ text: 'Headers:', bold: true }),
+        new Paragraph({ text: 'Authorization: Bearer <TOKEN_SUPERADMIN>', font: 'Consolas' }),
+        new Paragraph({ text: 'Body Request (JSON):', bold: true, spacing: { before: 100 } }),
+        createCodeBlock(`{\n  "nombre": "Nuevo Analista",\n  "email": "analista@prestamesta.com",\n  "password": "AdminSuperSeguro123",\n  "rol": "ANALISTA"\n}`),
+        new Paragraph({ text: 'Respuesta Exitosa (201 Created):', bold: true, spacing: { before: 100 } }),
+        createCodeBlock(`{\n  "mensaje": "Administrador creado exitosamente",\n  "adminId": 2,\n  "rol": "ANALISTA"\n}`),
+
         // SECCIÓN 3: CRÉDITOS Y PRÉSTAMOS
         new Paragraph({ text: '3. Módulo de Créditos y Préstamos', heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }),
 
         // 3.1 Crear Crédito
-        createEndpointHeader('POST', '/api/prestamos/creditos'),
-        new Paragraph({ text: 'Crea una opción en el catálogo de productos financieros (Requiere Token de Admin).' }),
+        createEndpointHeader('POST', '/api/v1/prestamos/creditos'),
+        new Paragraph({ text: 'Crea una opción en el catálogo de productos financieros. Requiere rol SUPERADMIN o ANALISTA.' }),
         new Paragraph({ text: 'Headers:', bold: true }),
         new Paragraph({ text: 'Authorization: Bearer <TOKEN_ADMIN>', font: 'Consolas' }),
         new Paragraph({ text: 'Body Request (JSON):', bold: true, spacing: { before: 100 } }),
@@ -155,32 +159,44 @@ const doc = new Document({
         createCodeBlock(`{\n  "mensaje": "Tipo de crédito creado con éxito",\n  "creditoId": 1\n}`),
 
         // 3.2 Listar Créditos
-        createEndpointHeader('GET', '/api/prestamos/creditos'),
-        new Paragraph({ text: 'Obtiene el catálogo de créditos disponibles para préstamos.' }),
+        createEndpointHeader('GET', '/api/v1/prestamos/creditos'),
+        new Paragraph({ text: 'Obtiene el catálogo de créditos disponibles. Requiere autenticación (cliente o administrador); no es público.' }),
         new Paragraph({ text: 'Headers:', bold: true }),
         new Paragraph({ text: 'Authorization: Bearer <TOKEN_CLIENTE_O_ADMIN>', font: 'Consolas' }),
         new Paragraph({ text: 'Respuesta Exitosa (200 OK):', bold: true, spacing: { before: 100 } }),
         createCodeBlock(`[\n  {\n    "id": 1,\n    "nombre": "Crédito Personal Express",\n    "monto_minimo": "1000.00",\n    "monto_maximo": "20000.00",\n    "tasa_interes_anual": "24.00",\n    "plazo_meses": 12,\n    "creado_en": "2026-08-02T02:43:54.000Z"\n  }\n]`),
 
         // 3.3 Solicitar Préstamo
-        createEndpointHeader('POST', '/api/prestamos/solicitar'),
-        new Paragraph({ text: 'El cliente solicita un préstamo agregando opcionalmente información del aval.' }),
+        createEndpointHeader('POST', '/api/v1/prestamos/solicitar'),
+        new Paragraph({ text: 'El cliente solicita un préstamo agregando opcionalmente información del aval. monto_total_a_pagar, saldo_pendiente y fecha_solicitud los fija siempre el servidor/la base de datos; nunca se aceptan del cliente. Tiene un límite de solicitudes por IP propio (SOLICITUD_RATE_LIMIT_WINDOW_MS/SOLICITUD_RATE_LIMIT_MAX, 10/hora por defecto), independiente del límite de login.' }),
         new Paragraph({ text: 'Headers:', bold: true }),
         new Paragraph({ text: 'Authorization: Bearer <TOKEN_CLIENTE>', font: 'Consolas' }),
         new Paragraph({ text: 'Body Request (JSON):', bold: true, spacing: { before: 100 } }),
         createCodeBlock(`{\n  "credito_id": 1,\n  "monto_solicitado": 10000,\n  "aval": {\n    "nombre": "Roberto Gómez",\n    "telefono": "8711234567",\n    "direccion": "Av. Morelos #450, Centro",\n    "ingreso_mensual": 15000\n  }\n}`),
         new Paragraph({ text: 'Respuesta Exitosa (201 Created):', bold: true, spacing: { before: 100 } }),
-        createCodeBlock(`{\n  "mensaje": "Solicitud de préstamo enviada con éxito",\n  "prestamoId": 1,\n  "montoSolicitado": 10000,\n  "montoTotalAPagar": "12400.00",\n  "estado": "PENDIENTE"\n}`),
+        createCodeBlock(`{\n  "mensaje": "Solicitud de préstamo enviada con éxito",\n  "prestamoId": 1,\n  "fechaSolicitud": "2026-08-02T20:46:06.000Z",\n  "montoSolicitado": 10000,\n  "montoTotalAPagar": "12400.00",\n  "estado": "PENDIENTE"\n}`),
 
         // 3.4 Aprobar / Rechazar Préstamo
-        createEndpointHeader('PATCH', '/api/prestamos/:id/estado'),
-        new Paragraph({ text: 'El administrador aprueba o rechaza la solicitud del cliente.' }),
+        createEndpointHeader('PATCH', '/api/v1/prestamos/:id/estado'),
+        new Paragraph({ text: 'El administrador (SUPERADMIN o ANALISTA) aprueba o rechaza la solicitud del cliente. Transición atómica solo desde PENDIENTE: un id inexistente responde 404, un préstamo ya procesado responde 409 (nunca 200 en ninguno de los dos casos).' }),
         new Paragraph({ text: 'Headers:', bold: true }),
         new Paragraph({ text: 'Authorization: Bearer <TOKEN_ADMIN>', font: 'Consolas' }),
         new Paragraph({ text: 'Body Request (JSON):', bold: true, spacing: { before: 100 } }),
-        createCodeBlock(`{\n  "estado": "APROBADO"\n}`),
+        createCodeBlock(`{\n  "estado": "APROBADO",\n  "motivo": "Cumple con el perfil de riesgo"\n}`),
         new Paragraph({ text: 'Respuesta Exitosa (200 OK):', bold: true, spacing: { before: 100 } }),
-        createCodeBlock(`{\n  "mensaje": "El préstamo #1 ha sido aprobado exitosamente."\n}`)
+        createCodeBlock(`{\n  "mensaje": "El préstamo #1 ha sido aprobado exitosamente."\n}`),
+
+        // SECCIÓN 4: PENDIENTE DE DECISIÓN
+        new Paragraph({ text: '4. Fuera de alcance / pendiente de decisión de producto', heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: 'No implementados todavía: registro/consulta de pagos, mora, liquidación, activación y cancelación de préstamos. El modelo Mongo HistorialPago existe pero no está conectado a ningún endpoint.',
+              italic: true,
+              size: 20
+            })
+          ]
+        })
       ]
     }
   ]

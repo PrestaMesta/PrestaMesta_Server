@@ -1,0 +1,520 @@
+openapi: 3.0.3
+info:
+  title: Prestamesta API
+  version: 1.0.0
+  description: >
+    API de Prestamesta: autenticacion de clientes y administradores, catalogo de
+    creditos y ciclo de vida de solicitudes de prestamo. Los pagos, la mora y la
+    liquidacion NO estan implementados todavia (ver x-pendiente-decision en el schema
+    EstadoPrestamo) y por lo tanto no tienen endpoints aqui.
+
+
+    Cliente y administrador usan tokens JWT con AUDIENCIAS DISTINTAS
+    (`prestamesta-client` / `prestamesta-admin`): un token de un dominio nunca es
+    aceptado por rutas del otro dominio, aunque la firma sea valida. Ver
+    securitySchemes.bearerAuth.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: auth-cliente
+  - name: auth-admin
+  - name: administradores
+  - name: prestamos
+  - name: salud
+
+paths:
+  /client/auth/register:
+    post:
+      tags: [auth-cliente]
+      summary: Registra un nuevo cliente
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClienteRegistroInput'
+      responses:
+        '201':
+          description: Cliente registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje: { type: string }
+                  clienteId: { type: integer }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: El correo ya esta registrado (codigo EMAIL_ALREADY_EXISTS)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /client/auth/login:
+    post:
+      tags: [auth-cliente]
+      summary: Autentica a un cliente
+      description: Devuelve un token con audiencia `prestamesta-client`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginInput'
+      responses:
+        '200':
+          description: Autenticacion exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje: { type: string }
+                  token: { type: string }
+                  cliente:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      nombre: { type: string }
+                      email: { type: string, format: email }
+        '401':
+          description: >
+            Credenciales invalidas (codigo INVALID_CREDENTIALS). Se devuelve el mismo
+            status y mensaje generico tanto si el correo no existe como si el password es
+            incorrecto, para no revelar si un correo esta registrado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/auth/login:
+    post:
+      tags: [auth-admin]
+      summary: Autentica a un administrador
+      description: >
+        Unico endpoint publico bajo /admin/auth: crear administradores NO es una
+        operacion de autenticacion (ver POST /admin/administradores). Devuelve un token
+        con audiencia `prestamesta-admin`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginInput'
+      responses:
+        '200':
+          description: Autenticacion exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje: { type: string }
+                  token: { type: string }
+                  admin:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      nombre: { type: string }
+                      email: { type: string, format: email }
+                      rol: { $ref: '#/components/schemas/Rol' }
+        '401':
+          description: >
+            Credenciales invalidas o cuenta desactivada (codigo INVALID_CREDENTIALS).
+            Mismo status/mensaje generico para correo inexistente, password incorrecto y
+            cuenta con activo=false: no se revela cual de los tres paso.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/administradores:
+    post:
+      tags: [administradores]
+      summary: Crea un nuevo administrador
+      description: >
+        Requiere un token de administrador (audiencia `prestamesta-admin`) cuyo rol,
+        releido directamente de la base de datos (no del JWT), sea SUPERADMIN. El primer
+        SUPERADMIN se crea unicamente con `npm run seed:superadmin` (script offline);
+        este endpoint nunca esta disponible sin autenticar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrearAdministradorInput'
+      responses:
+        '201':
+          description: Administrador creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje: { type: string }
+                  adminId: { type: integer }
+                  rol: { $ref: '#/components/schemas/Rol' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: El correo ya esta registrado para un administrador (codigo EMAIL_ALREADY_EXISTS)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /prestamos/creditos:
+    get:
+      tags: [prestamos]
+      summary: Lista el catalogo de creditos
+      description: >
+        Requiere estar autenticado, con token de cliente O de administrador (unico
+        endpoint leido por ambos dominios). No es publico.
+      responses:
+        '200':
+          description: Catalogo de creditos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Credito' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [prestamos]
+      summary: Crea un tipo de credito en el catalogo
+      description: Requiere rol SUPERADMIN o ANALISTA (releido de base de datos).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditoInput'
+      responses:
+        '201':
+          description: Credito creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje: { type: string }
+                  creditoId: { type: integer }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /prestamos/solicitar:
+    post:
+      tags: [prestamos]
+      summary: Solicita un prestamo (cliente autenticado)
+      description: >
+        monto_total_a_pagar y saldo_pendiente los calcula y valida el servidor siempre
+        (interes simple anual prorrateado, ver x-formula en SolicitudPrestamoInput); el
+        cliente nunca puede enviarlos ni influir en ellos, y el validador los rechaza si
+        vienen en el body. fecha_solicitud la fija la base de datos al insertar.
+
+
+        Rate limit propio por IP (`SOLICITUD_RATE_LIMIT_WINDOW_MS`/`SOLICITUD_RATE_LIMIT_MAX`,
+        10 solicitudes/hora por defecto), independiente y menos agresivo que el de
+        login/registro.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudPrestamoInput'
+      responses:
+        '201':
+          description: Solicitud registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje: { type: string }
+                  prestamoId: { type: integer }
+                  fechaSolicitud: { type: string, format: date-time }
+                  montoSolicitado: { type: number }
+                  montoTotalAPagar: { type: string }
+                  estado: { $ref: '#/components/schemas/EstadoPrestamo' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Tipo de credito no encontrado (codigo CREDIT_NOT_FOUND)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Se supero el limite de solicitudes por IP (SOLICITUD_RATE_LIMIT_*)
+
+  /prestamos/{id}/estado:
+    patch:
+      tags: [prestamos]
+      summary: Aprueba o rechaza una solicitud de prestamo
+      description: >
+        Requiere rol SUPERADMIN o ANALISTA (releido de base de datos). Transicion
+        atomica solo desde PENDIENTE (SELECT ... FOR UPDATE + UPDATE condicional dentro
+        de una transaccion). Un id inexistente responde 404 LOAN_NOT_FOUND; un prestamo
+        que ya no esta PENDIENTE (doble aprobacion, condicion de carrera entre dos
+        administradores, o estado ya terminal) responde 409 INVALID_TRANSITION — nunca
+        200 en ninguno de los dos casos.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambiarEstadoInput'
+      responses:
+        '200':
+          description: Estado actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje: { type: string }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Prestamo no encontrado (codigo LOAN_NOT_FOUND)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: El prestamo ya no esta en estado PENDIENTE (codigo INVALID_TRANSITION)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /health/live:
+    get:
+      tags: [salud]
+      summary: Liveness — el proceso Node/Express esta vivo
+      description: No verifica MySQL ni Mongo. No requiere autenticacion.
+      security: []
+      servers:
+        - url: /
+      responses:
+        '200':
+          description: Proceso vivo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /health/ready:
+    get:
+      tags: [salud]
+      summary: Readiness — conectividad real a MySQL y Mongo con timeout corto
+      description: >
+        No expone nombres de base de datos, hosts, versiones, credenciales ni stack
+        traces. No requiere autenticacion.
+      security: []
+      servers:
+        - url: /
+      responses:
+        '200':
+          description: Listo para recibir trafico
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+        '503':
+          description: No listo (alguna dependencia no responde)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: degraded }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Token JWT (HS256). Cliente y administrador usan audiencias distintas
+        (`prestamesta-client` / `prestamesta-admin`): OpenAPI no puede expresar "audience
+        distinta por operacion" con este securityScheme unico, pero la API lo aplica en
+        cada ruta (ver la descripcion de cada operacion y el rol/tipoUsuario esperado).
+
+  responses:
+    ValidationError:
+      description: Los datos enviados no son validos (codigo VALIDATION_ERROR)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Unauthorized:
+      description: Token ausente, invalido o expirado (codigo TOKEN_INVALID o TOKEN_EXPIRED)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Autenticado pero sin permiso para esta accion (codigo FORBIDDEN)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      properties:
+        mensaje: { type: string }
+        codigo:
+          type: string
+          enum:
+            - INVALID_CREDENTIALS
+            - TOKEN_INVALID
+            - TOKEN_EXPIRED
+            - FORBIDDEN
+            - VALIDATION_ERROR
+            - EMAIL_ALREADY_EXISTS
+            - CREDIT_NOT_FOUND
+            - LOAN_NOT_FOUND
+            - INVALID_TRANSITION
+            - NOT_FOUND
+            - INTERNAL_ERROR
+        requestId: { type: string }
+        detalles:
+          type: array
+          items:
+            type: object
+            properties:
+              campo: { type: string }
+              mensaje: { type: string }
+
+    Rol:
+      type: string
+      enum: [SUPERADMIN, ANALISTA, COBRADOR]
+
+    EstadoPrestamo:
+      type: string
+      enum: [PENDIENTE, APROBADO, RECHAZADO]
+      description: >
+        x-pendiente-decision: ACTIVO, PAGADO/LIQUIDADO, EN_MORA y CANCELADO no estan
+        implementados (no hay endpoint de pagos ni reglas de mora definidas en el codigo
+        actual). No se incluyen en este enum hasta que exista esa decision de producto.
+
+    ClienteRegistroInput:
+      type: object
+      required: [nombre, email, password]
+      properties:
+        nombre: { type: string, maxLength: 150 }
+        email: { type: string, format: email, maxLength: 190 }
+        password:
+          type: string
+          minLength: 12
+          maxLength: 72
+          description: >
+            Limite real es 72 BYTES (limite efectivo de bcrypt), no 72 caracteres: un
+            password con caracteres multibyte UTF-8 puede exceder el limite con menos de
+            72 caracteres. La API rechaza (nunca trunca) un password fuera de rango.
+        telefono: { type: string, maxLength: 20 }
+      additionalProperties: false
+
+    CrearAdministradorInput:
+      type: object
+      required: [nombre, email, password, rol]
+      properties:
+        nombre: { type: string, maxLength: 150 }
+        email: { type: string, format: email, maxLength: 190 }
+        password:
+          type: string
+          minLength: 12
+          maxLength: 72
+          description: Mismo limite de 72 bytes que ClienteRegistroInput.password.
+        rol: { $ref: '#/components/schemas/Rol' }
+      additionalProperties: false
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+      additionalProperties: false
+
+    Credito:
+      type: object
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        monto_minimo: { type: string }
+        monto_maximo: { type: string }
+        tasa_interes_anual: { type: string }
+        plazo_meses: { type: integer }
+        creado_en: { type: string, format: date-time }
+
+    CreditoInput:
+      type: object
+      required: [nombre, monto_minimo, monto_maximo, tasa_interes_anual, plazo_meses]
+      properties:
+        nombre: { type: string, maxLength: 150 }
+        monto_minimo: { type: number, minimum: 0, exclusiveMinimum: true }
+        monto_maximo: { type: number, minimum: 0, exclusiveMinimum: true }
+        tasa_interes_anual: { type: number, minimum: 0 }
+        plazo_meses: { type: integer, minimum: 0, exclusiveMinimum: true }
+      additionalProperties: false
+
+    AvalInput:
+      type: object
+      required: [nombre, telefono]
+      properties:
+        nombre: { type: string, maxLength: 150 }
+        telefono: { type: string, maxLength: 20 }
+        direccion: { type: string, maxLength: 255 }
+        ingreso_mensual: { type: number, minimum: 0 }
+      additionalProperties: false
+
+    SolicitudPrestamoInput:
+      type: object
+      required: [credito_id, monto_solicitado]
+      description: >
+        x-formula: monto_total_a_pagar = monto_solicitado + (monto_solicitado *
+        tasa_interes_anual/100 * plazo_meses/12). Interes simple anual prorrateado
+        linealmente por el plazo, sin capitalizacion, redondeado a 2 decimales
+        (ROUND_HALF_UP). Regla de negocio existente en el codigo original, documentada
+        aqui, no un modelo financiero universal.
+      properties:
+        credito_id: { type: integer, minimum: 0, exclusiveMinimum: true }
+        monto_solicitado: { type: number, minimum: 0, exclusiveMinimum: true }
+        aval: { $ref: '#/components/schemas/AvalInput' }
+      additionalProperties: false
+
+    CambiarEstadoInput:
+      type: object
+      required: [estado]
+      properties:
+        estado: { type: string, enum: [APROBADO, RECHAZADO] }
+        motivo: { type: string, maxLength: 500 }
+      additionalProperties: false

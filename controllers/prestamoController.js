@@ -1,128 +1,56 @@
-const pool = require('../config/db.mysql');
+const prestamoService = require('../services/prestamoService');
 
-// 1. [ADMIN] Crear un tipo de crédito en el catálogo
-exports.crearCredito = async (req, res) => {
-  const { nombre, monto_minimo, monto_maximo, tasa_interes_anual, plazo_meses } = req.body;
-
-  if (!nombre || !monto_minimo || !monto_maximo || !tasa_interes_anual || !plazo_meses) {
-    return res.status(400).json({ mensaje: 'Todos los campos son obligatorios.' });
-  }
-
+// 1. [ADMIN] Crear un tipo de credito en el catalogo
+exports.crearCredito = async (req, res, next) => {
   try {
-    const [result] = await pool.query(
-      'INSERT INTO creditos (nombre, monto_minimo, monto_maximo, tasa_interes_anual, plazo_meses) VALUES (?, ?, ?, ?, ?)',
-      [nombre, monto_minimo, monto_maximo, tasa_interes_anual, plazo_meses]
-    );
-
-    res.status(201).json({ mensaje: 'Tipo de crédito creado con éxito', creditoId: result.insertId });
+    const { creditoId } = await prestamoService.crearCredito(req.body);
+    res.status(201).json({ mensaje: 'Tipo de credito creado con exito', creditoId });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al crear el crédito', error: error.message });
+    next(error);
   }
 };
 
-// 2. [CLIENTE / ADMIN] Listar tipos de créditos disponibles
-exports.obtenerCreditos = async (req, res) => {
+// 2. [CLIENTE / ADMIN] Listar tipos de creditos disponibles
+exports.obtenerCreditos = async (req, res, next) => {
   try {
-    const [creditos] = await pool.query('SELECT * FROM creditos');
+    const creditos = await prestamoService.listarCreditos();
     res.json(creditos);
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al consultar créditos', error: error.message });
+    next(error);
   }
 };
 
-// 3. [CLIENTE] Solicitar un préstamo con opción de aval
-exports.solicitarPrestamo = async (req, res) => {
-  const cliente_id = req.usuario.id; // Extraído del JWT
-  const { credito_id, monto_solicitado, aval } = req.body;
-
-  if (!credito_id || !monto_solicitado) {
-    return res.status(400).json({ mensaje: 'El tipo de crédito y el monto son obligatorios.' });
-  }
-
-  const connection = await pool.getConnection();
-
+// 3. [CLIENTE] Solicitar un prestamo con opcion de aval
+exports.solicitarPrestamo = async (req, res, next) => {
   try {
-    await connection.beginTransaction();
-
-    // Validar crédito en catálogo
-    const [creditos] = await connection.query('SELECT * FROM creditos WHERE id = ?', [credito_id]);
-    if (creditos.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ mensaje: 'Tipo de crédito no encontrado.' });
-    }
-
-    const credito = creditos[0];
-
-    if (monto_solicitado < credito.monto_minimo || monto_solicitado > credito.monto_maximo) {
-      await connection.rollback();
-      return res.status(400).json({ 
-        mensaje: `El monto debe estar entre $${credito.monto_minimo} y $${credito.monto_maximo}` 
-      });
-    }
-
-    // Calcular el total a pagar (Interés simple)
-    const tasaDecimal = credito.tasa_interes_anual / 100;
-    const interesGenerado = monto_solicitado * tasaDecimal * (credito.plazo_meses / 12);
-    const monto_total_a_pagar = parseFloat(monto_solicitado) + interesGenerado;
-
-    // Registrar solicitud
-    const [prestamoResult] = await connection.query(
-      `INSERT INTO prestamos (cliente_id, credito_id, monto_solicitado, monto_total_a_pagar, saldo_pendiente) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [cliente_id, credito_id, monto_solicitado, monto_total_a_pagar, monto_total_a_pagar]
-    );
-
-    const prestamoId = prestamoResult.insertId;
-
-    // Registrar Aval si se incluyó en la petición
-    if (aval && aval.nombre && aval.telefono) {
-      await connection.query(
-        `INSERT INTO avales (prestamo_id, nombre, telefono, direccion, ingreso_mensual) 
-         VALUES (?, ?, ?, ?, ?)`,
-        [prestamoId, aval.nombre, aval.telefono, aval.direccion || null, aval.ingreso_mensual || 0]
-      );
-    }
-
-    await connection.commit();
-
+    const clienteId = Number(req.usuario.sub);
+    const resultado = await prestamoService.solicitarPrestamo({ clienteId, ...req.body });
     res.status(201).json({
-      mensaje: 'Solicitud de préstamo enviada con éxito',
-      prestamoId,
-      montoSolicitado: monto_solicitado,
-      montoTotalAPagar: monto_total_a_pagar.toFixed(2),
-      estado: 'PENDIENTE'
+      mensaje: 'Solicitud de prestamo enviada con exito',
+      prestamoId: resultado.prestamoId,
+      fechaSolicitud: resultado.fechaSolicitud,
+      montoSolicitado: resultado.montoSolicitado,
+      montoTotalAPagar: resultado.montoTotalAPagar,
+      estado: resultado.estado
     });
   } catch (error) {
-    await connection.rollback();
-    res.status(500).json({ mensaje: 'Error al procesar la solicitud', error: error.message });
-  } finally {
-    connection.release();
+    next(error);
   }
 };
 
-// 4. [ADMIN] Aprobar o rechazar préstamo
-exports.cambiarEstadoPrestamo = async (req, res) => {
-  const { id } = req.params;
-  const { estado } = req.body; // 'APROBADO' o 'RECHAZADO'
-
-  if (!['APROBADO', 'RECHAZADO'].includes(estado)) {
-    return res.status(400).json({ mensaje: 'Estado no válido. Use APROBADO o RECHAZADO.' });
-  }
-
+// 4. [ADMIN] Aprobar o rechazar prestamo
+exports.cambiarEstadoPrestamo = async (req, res, next) => {
   try {
-    const fechaAprobacion = estado === 'APROBADO' ? new Date() : null;
-
-    const [result] = await pool.query(
-      'UPDATE prestamos SET estado = ?, fecha_aprobacion = ? WHERE id = ?',
-      [estado, fechaAprobacion, id]
-    );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ mensaje: 'Préstamo no encontrado.' });
-    }
-
-    res.json({ mensaje: `El préstamo #${id} ha sido ${estado.toLowerCase()} exitosamente.` });
+    const resultado = await prestamoService.cambiarEstado({
+      prestamoId: req.params.id,
+      nuevoEstado: req.body.estado,
+      administradorId: Number(req.administradorActual.id),
+      motivo: req.body.motivo
+    });
+    res.json({
+      mensaje: `El prestamo #${resultado.prestamoId} ha sido ${resultado.estadoNuevo.toLowerCase()} exitosamente.`
+    });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al actualizar el estado del préstamo', error: error.message });
+    next(error);
   }
 };
