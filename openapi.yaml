@@ -44,8 +44,8 @@ paths:
               schema:
                 type: object
                 properties:
-                  mensaje: { type: string }
-                  clienteId: { type: integer }
+                  mensaje: { type: string, example: Cliente registrado exitosamente }
+                  clienteId: { type: integer, example: 1 }
         '400':
           $ref: '#/components/responses/ValidationError'
         '409':
@@ -66,6 +66,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/LoginInput'
+            example:
+              email: juan@example.com
+              password: miPasswordSeguro123
       responses:
         '200':
           description: Autenticacion exitosa
@@ -74,14 +77,14 @@ paths:
               schema:
                 type: object
                 properties:
-                  mensaje: { type: string }
-                  token: { type: string }
+                  mensaje: { type: string, example: Autenticación exitosa }
+                  token: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
                   cliente:
                     type: object
                     properties:
-                      id: { type: integer }
-                      nombre: { type: string }
-                      email: { type: string, format: email }
+                      id: { type: integer, example: 1 }
+                      nombre: { type: string, example: Juan Pérez }
+                      email: { type: string, format: email, example: juan@example.com }
         '401':
           description: >
             Credenciales invalidas (codigo INVALID_CREDENTIALS). Se devuelve el mismo
@@ -106,6 +109,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/LoginInput'
+            example:
+              email: admin@prestamesta.com
+              password: AdminSuperSeguro123
       responses:
         '200':
           description: Autenticacion exitosa
@@ -114,14 +120,14 @@ paths:
               schema:
                 type: object
                 properties:
-                  mensaje: { type: string }
-                  token: { type: string }
+                  mensaje: { type: string, example: Autenticación de administrador exitosa }
+                  token: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
                   admin:
                     type: object
                     properties:
-                      id: { type: integer }
-                      nombre: { type: string }
-                      email: { type: string, format: email }
+                      id: { type: integer, example: 1 }
+                      nombre: { type: string, example: Admin Principal }
+                      email: { type: string, format: email, example: admin@prestamesta.com }
                       rol: { $ref: '#/components/schemas/Rol' }
         '401':
           description: >
@@ -155,8 +161,8 @@ paths:
               schema:
                 type: object
                 properties:
-                  mensaje: { type: string }
-                  adminId: { type: integer }
+                  mensaje: { type: string, example: Administrador creado exitosamente }
+                  adminId: { type: integer, example: 2 }
                   rol: { $ref: '#/components/schemas/Rol' }
         '400':
           $ref: '#/components/responses/ValidationError'
@@ -205,8 +211,8 @@ paths:
               schema:
                 type: object
                 properties:
-                  mensaje: { type: string }
-                  creditoId: { type: integer }
+                  mensaje: { type: string, example: Tipo de crédito creado con éxito }
+                  creditoId: { type: integer, example: 1 }
         '400':
           $ref: '#/components/responses/ValidationError'
         '401':
@@ -242,11 +248,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  mensaje: { type: string }
-                  prestamoId: { type: integer }
-                  fechaSolicitud: { type: string, format: date-time }
-                  montoSolicitado: { type: number }
-                  montoTotalAPagar: { type: string }
+                  mensaje: { type: string, example: Solicitud de préstamo enviada con éxito }
+                  prestamoId: { type: integer, example: 1 }
+                  fechaSolicitud: { type: string, format: date-time, example: '2026-08-02T20:46:06.000Z' }
+                  montoSolicitado: { type: number, example: 10000 }
+                  montoTotalAPagar: { type: string, example: '12400.00' }
                   estado: { $ref: '#/components/schemas/EstadoPrestamo' }
         '400':
           $ref: '#/components/responses/ValidationError'
@@ -278,6 +284,7 @@ paths:
           name: id
           required: true
           schema: { type: integer, minimum: 1 }
+          example: 1
       requestBody:
         required: true
         content:
@@ -292,7 +299,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  mensaje: { type: string }
+                  mensaje: { type: string, example: 'El préstamo #1 ha sido aprobado exitosamente.' }
         '400':
           $ref: '#/components/responses/ValidationError'
         '401':
@@ -389,7 +396,7 @@ components:
     ErrorEnvelope:
       type: object
       properties:
-        mensaje: { type: string }
+        mensaje: { type: string, example: Credenciales inválidas. }
         codigo:
           type: string
           enum:
@@ -404,14 +411,15 @@ components:
             - INVALID_TRANSITION
             - NOT_FOUND
             - INTERNAL_ERROR
-        requestId: { type: string }
+          example: INVALID_CREDENTIALS
+        requestId: { type: string, example: 3fa3a1c2-9c2b-4e9e-8b34-1a2b3c4d5e6f }
         detalles:
           type: array
           items:
             type: object
             properties:
-              campo: { type: string }
-              mensaje: { type: string }
+              campo: { type: string, example: email }
+              mensaje: { type: string, example: Invalid email address }
 
     Rol:
       type: string
@@ -429,31 +437,33 @@ components:
       type: object
       required: [nombre, email, password]
       properties:
-        nombre: { type: string, maxLength: 150 }
-        email: { type: string, format: email, maxLength: 190 }
+        nombre: { type: string, maxLength: 150, example: Juan Pérez }
+        email: { type: string, format: email, maxLength: 190, example: juan@example.com }
         password:
           type: string
           minLength: 12
           maxLength: 72
+          example: miPasswordSeguro123
           description: >
             Limite real es 72 BYTES (limite efectivo de bcrypt), no 72 caracteres: un
             password con caracteres multibyte UTF-8 puede exceder el limite con menos de
             72 caracteres. La API rechaza (nunca trunca) un password fuera de rango.
-        telefono: { type: string, maxLength: 20 }
+        telefono: { type: string, maxLength: 20, example: '8711234567' }
       additionalProperties: false
 
     CrearAdministradorInput:
       type: object
       required: [nombre, email, password, rol]
       properties:
-        nombre: { type: string, maxLength: 150 }
-        email: { type: string, format: email, maxLength: 190 }
+        nombre: { type: string, maxLength: 150, example: Nuevo Analista }
+        email: { type: string, format: email, maxLength: 190, example: analista@prestamesta.com }
         password:
           type: string
           minLength: 12
           maxLength: 72
+          example: AdminSuperSeguro123
           description: Mismo limite de 72 bytes que ClienteRegistroInput.password.
-        rol: { $ref: '#/components/schemas/Rol' }
+        rol: { allOf: [{ $ref: '#/components/schemas/Rol' }], example: ANALISTA }
       additionalProperties: false
 
     LoginInput:
@@ -467,33 +477,33 @@ components:
     Credito:
       type: object
       properties:
-        id: { type: integer }
-        nombre: { type: string }
-        monto_minimo: { type: string }
-        monto_maximo: { type: string }
-        tasa_interes_anual: { type: string }
-        plazo_meses: { type: integer }
-        creado_en: { type: string, format: date-time }
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Crédito Personal Express }
+        monto_minimo: { type: string, example: '1000.00' }
+        monto_maximo: { type: string, example: '20000.00' }
+        tasa_interes_anual: { type: string, example: '24.00' }
+        plazo_meses: { type: integer, example: 12 }
+        creado_en: { type: string, format: date-time, example: '2026-08-02T02:43:54.000Z' }
 
     CreditoInput:
       type: object
       required: [nombre, monto_minimo, monto_maximo, tasa_interes_anual, plazo_meses]
       properties:
-        nombre: { type: string, maxLength: 150 }
-        monto_minimo: { type: number, minimum: 0, exclusiveMinimum: true }
-        monto_maximo: { type: number, minimum: 0, exclusiveMinimum: true }
-        tasa_interes_anual: { type: number, minimum: 0 }
-        plazo_meses: { type: integer, minimum: 0, exclusiveMinimum: true }
+        nombre: { type: string, maxLength: 150, example: Crédito Personal Express }
+        monto_minimo: { type: number, minimum: 0, exclusiveMinimum: true, example: 1000 }
+        monto_maximo: { type: number, minimum: 0, exclusiveMinimum: true, example: 20000 }
+        tasa_interes_anual: { type: number, minimum: 0, example: 24 }
+        plazo_meses: { type: integer, minimum: 0, exclusiveMinimum: true, example: 12 }
       additionalProperties: false
 
     AvalInput:
       type: object
       required: [nombre, telefono]
       properties:
-        nombre: { type: string, maxLength: 150 }
-        telefono: { type: string, maxLength: 20 }
-        direccion: { type: string, maxLength: 255 }
-        ingreso_mensual: { type: number, minimum: 0 }
+        nombre: { type: string, maxLength: 150, example: Roberto Gómez }
+        telefono: { type: string, maxLength: 20, example: '8711234567' }
+        direccion: { type: string, maxLength: 255, example: 'Av. Morelos #450, Centro' }
+        ingreso_mensual: { type: number, minimum: 0, example: 15000 }
       additionalProperties: false
 
     SolicitudPrestamoInput:
@@ -506,8 +516,8 @@ components:
         (ROUND_HALF_UP). Regla de negocio existente en el codigo original, documentada
         aqui, no un modelo financiero universal.
       properties:
-        credito_id: { type: integer, minimum: 0, exclusiveMinimum: true }
-        monto_solicitado: { type: number, minimum: 0, exclusiveMinimum: true }
+        credito_id: { type: integer, minimum: 0, exclusiveMinimum: true, example: 1 }
+        monto_solicitado: { type: number, minimum: 0, exclusiveMinimum: true, example: 10000 }
         aval: { $ref: '#/components/schemas/AvalInput' }
       additionalProperties: false
 
@@ -515,6 +525,6 @@ components:
       type: object
       required: [estado]
       properties:
-        estado: { type: string, enum: [APROBADO, RECHAZADO] }
-        motivo: { type: string, maxLength: 500 }
+        estado: { type: string, enum: [APROBADO, RECHAZADO], example: APROBADO }
+        motivo: { type: string, maxLength: 500, example: Cumple con el perfil de riesgo }
       additionalProperties: false
