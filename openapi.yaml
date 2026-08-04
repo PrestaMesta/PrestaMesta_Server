@@ -317,6 +317,150 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /client/prestamos:
+    get:
+      tags: [prestamos]
+      summary: Lista los prestamos propios del cliente autenticado
+      description: >
+        `cliente_id` sale exclusivamente del JWT verificado (claim `sub`), nunca de query ni
+        body; no existe forma de que un cliente consulte prestamos de otro. Orden fijo
+        (no configurable): `fecha_solicitud DESC, id DESC`. Una pagina posterior a la
+        ultima disponible responde 200 con `data: []`, nunca 404. Parametros de query
+        repetidos (`?page=1&page=2`) se rechazan con 400 VALIDATION_ERROR.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Pagina de prestamos del cliente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PrestamoClienteListItem' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /client/prestamos/{id}:
+    get:
+      tags: [prestamos]
+      summary: Detalle de un prestamo propio (incluye credito y aval)
+      description: >
+        El filtro de propiedad (`WHERE id = ? AND cliente_id = ?`) vive dentro de la
+        consulta SQL, no en una capa aparte. Un id que no existe y un id que existe pero
+        pertenece a otro cliente responden EXACTAMENTE el mismo 404 LOAN_NOT_FOUND, sin
+        distinguir el caso (mismo principio anti-enumeracion que el login). El aval es
+        `null` si el prestamo no tiene uno registrado; si existe, sus campos opcionales
+        ausentes (`direccion`) salen como `null`, nunca como cadena vacia.
+      parameters:
+        - $ref: '#/components/parameters/PrestamoId'
+      responses:
+        '200':
+          description: Detalle del prestamo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrestamoClienteDetalle' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Prestamo inexistente o de otro cliente (codigo LOAN_NOT_FOUND, mismo caso)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/prestamos:
+    get:
+      tags: [prestamos]
+      summary: Lista prestamos de todos los clientes con filtros administrativos
+      description: >
+        Requiere rol SUPERADMIN o ANALISTA (releido de base de datos); COBRADOR no tiene
+        acceso. Filtros opcionales combinables con AND: `estado`, `cliente_id`,
+        `credito_id`, `fecha_desde`/`fecha_hasta` (sobre `fecha_solicitud`). `fecha_desde`
+        es inclusiva desde las 00:00:00 del dia indicado; `fecha_hasta` incluye el dia
+        completo, implementado como limite EXCLUSIVO del dia siguiente (nunca concatenando
+        "23:59:59"). Ambos limites se interpretan en la zona horaria del proceso Node del
+        servidor (no fijada explicitamente por esta app via `TZ`; hereda la del sistema o
+        contenedor — el mismo comportamiento ya existente para `fecha_solicitud`). Enviar
+        `fecha_desde` posterior a `fecha_hasta` responde 400 VALIDATION_ERROR. Orden fijo:
+        `fecha_solicitud DESC, id DESC`.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - in: query
+          name: estado
+          required: false
+          schema: { $ref: '#/components/schemas/EstadoPrestamo' }
+        - in: query
+          name: cliente_id
+          required: false
+          schema: { type: integer, minimum: 1 }
+          example: 7
+        - in: query
+          name: credito_id
+          required: false
+          schema: { type: integer, minimum: 1 }
+          example: 1
+        - in: query
+          name: fecha_desde
+          required: false
+          schema: { type: string, format: date, example: '2026-01-01' }
+          description: Inclusiva, 00:00:00 del dia indicado.
+        - in: query
+          name: fecha_hasta
+          required: false
+          schema: { type: string, format: date, example: '2026-01-31' }
+          description: Incluye el dia completo (limite exclusivo del dia siguiente).
+      responses:
+        '200':
+          description: Pagina de prestamos (vista administrativa)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PrestamoAdminListItem' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/prestamos/{id}:
+    get:
+      tags: [prestamos]
+      summary: Detalle administrativo de un prestamo (incluye cliente, credito y aval)
+      description: >
+        Requiere rol SUPERADMIN o ANALISTA (releido de base de datos). Del cliente
+        solicitante solo se exponen `id`, `nombre`, `email` y `telefono` (null si no existe
+        en BD) — nunca password ni otros datos de perfil.
+      parameters:
+        - $ref: '#/components/parameters/PrestamoId'
+      responses:
+        '200':
+          description: Detalle administrativo del prestamo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrestamoAdminDetalle' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Prestamo no encontrado (codigo LOAN_NOT_FOUND)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   /health/live:
     get:
       tags: [salud]
@@ -374,6 +518,27 @@ components:
         (`prestamesta-client` / `prestamesta-admin`): OpenAPI no puede expresar "audience
         distinta por operacion" con este securityScheme unico, pero la API lo aplica en
         cada ruta (ver la descripcion de cada operacion y el rol/tipoUsuario esperado).
+
+  parameters:
+    Page:
+      in: query
+      name: page
+      required: false
+      schema: { type: integer, minimum: 1, default: 1 }
+      description: Pagina 1-indexada. Un valor mayor a las paginas disponibles responde 200 con data vacia, nunca 404.
+      example: 1
+    Limit:
+      in: query
+      name: limit
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      example: 20
+    PrestamoId:
+      in: path
+      name: id
+      required: true
+      schema: { type: integer, minimum: 1 }
+      example: 1
 
   responses:
     ValidationError:
@@ -528,3 +693,102 @@ components:
         estado: { type: string, enum: [APROBADO, RECHAZADO], example: APROBADO }
         motivo: { type: string, maxLength: 500, example: Cumple con el perfil de riesgo }
       additionalProperties: false
+
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer, example: 1 }
+        limit: { type: integer, example: 20 }
+        total: { type: integer, example: 3, description: Total de filas que cumplen los filtros (todas las paginas). }
+        totalPages: { type: integer, example: 1, description: '0 cuando total es 0.' }
+
+    CreditoResumen:
+      type: object
+      description: Vista minima del credito (id + nombre), anidada en los listados de prestamos.
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Crédito Personal Express }
+
+    ClienteResumen:
+      type: object
+      description: Vista minima del cliente, anidada en el listado administrativo de prestamos.
+      properties:
+        id: { type: integer, example: 7 }
+        nombre: { type: string, example: Juan Pérez }
+        email: { type: string, format: email, example: juan@example.com }
+
+    AvalDetalle:
+      type: object
+      nullable: true
+      description: >
+        null si el prestamo no tiene aval registrado. Si existe, los campos opcionales
+        ausentes salen como null (nunca '' ni 0): direccion es null si no se envio al
+        solicitar, ingreso_mensual es un string DECIMAL como '0.00' unicamente si
+        efectivamente se almaceno como cero.
+      properties:
+        id: { type: integer, example: 5 }
+        nombre: { type: string, example: Roberto Gómez }
+        telefono: { type: string, example: '8711234567' }
+        direccion: { type: string, nullable: true, example: 'Av. Morelos #450, Centro' }
+        ingreso_mensual: { type: string, nullable: true, example: '15000.00' }
+
+    PrestamoClienteListItem:
+      type: object
+      description: >
+        monto_solicitado/monto_total_a_pagar/saldo_pendiente son strings (columnas
+        DECIMAL leidas directo de MySQL, mysql2 sin `decimalNumbers`) -- a diferencia de
+        POST /prestamos/solicitar, donde montoSolicitado en la respuesta es el number que
+        envio el cliente en el body, nunca releido de BD. Es una asimetria real entre
+        ambos endpoints, no normalizada aqui a proposito.
+      properties:
+        id: { type: integer, example: 1 }
+        credito: { $ref: '#/components/schemas/CreditoResumen' }
+        monto_solicitado: { type: string, example: '10000.00' }
+        monto_total_a_pagar: { type: string, example: '12400.00' }
+        saldo_pendiente: { type: string, example: '12400.00' }
+        estado: { $ref: '#/components/schemas/EstadoPrestamo' }
+        fecha_solicitud: { type: string, format: date-time, example: '2026-08-02T20:46:06.000Z' }
+        fecha_decision: { type: string, format: date-time, nullable: true, example: null }
+
+    PrestamoClienteDetalle:
+      allOf:
+        - $ref: '#/components/schemas/PrestamoClienteListItem'
+        - type: object
+          properties:
+            aval: { $ref: '#/components/schemas/AvalDetalle' }
+
+    PrestamoAdminListItem:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        cliente: { $ref: '#/components/schemas/ClienteResumen' }
+        credito: { $ref: '#/components/schemas/CreditoResumen' }
+        monto_solicitado: { type: string, example: '10000.00' }
+        monto_total_a_pagar: { type: string, example: '12400.00' }
+        saldo_pendiente: { type: string, example: '12400.00' }
+        estado: { $ref: '#/components/schemas/EstadoPrestamo' }
+        fecha_solicitud: { type: string, format: date-time, example: '2026-08-02T20:46:06.000Z' }
+        fecha_decision: { type: string, format: date-time, nullable: true, example: null }
+
+    ClienteDetalleAdmin:
+      type: object
+      description: Nunca incluye password ni otros datos de perfil fuera de estos cuatro campos.
+      properties:
+        id: { type: integer, example: 7 }
+        nombre: { type: string, example: Juan Pérez }
+        email: { type: string, format: email, example: juan@example.com }
+        telefono: { type: string, nullable: true, example: '8711234567' }
+
+    PrestamoAdminDetalle:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        cliente: { $ref: '#/components/schemas/ClienteDetalleAdmin' }
+        credito: { $ref: '#/components/schemas/Credito' }
+        monto_solicitado: { type: string, example: '10000.00' }
+        monto_total_a_pagar: { type: string, example: '12400.00' }
+        saldo_pendiente: { type: string, example: '12400.00' }
+        estado: { $ref: '#/components/schemas/EstadoPrestamo' }
+        fecha_solicitud: { type: string, format: date-time, example: '2026-08-02T20:46:06.000Z' }
+        fecha_decision: { type: string, format: date-time, nullable: true, example: null }
+        aval: { $ref: '#/components/schemas/AvalDetalle' }

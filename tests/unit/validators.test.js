@@ -187,4 +187,96 @@ describe('validators/prestamoValidators', () => {
     expect(prestamo.idParamSchema.safeParse({ id: '-1' }).success).toBe(false);
     expect(prestamo.idParamSchema.safeParse({ id: 'abc' }).success).toBe(false);
   });
+
+  describe('paginacionSchema (GET /client/prestamos)', () => {
+    test('aplica defaults page=1 y limit=20 cuando no se envia nada', () => {
+      const result = prestamo.paginacionSchema.safeParse({});
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ page: 1, limit: 20 });
+    });
+
+    test('rechaza limit fuera de 1..100', () => {
+      expect(prestamo.paginacionSchema.safeParse({ limit: '0' }).success).toBe(false);
+      expect(prestamo.paginacionSchema.safeParse({ limit: '101' }).success).toBe(false);
+      expect(prestamo.paginacionSchema.safeParse({ limit: '100' }).success).toBe(true);
+    });
+
+    test('rechaza page menor a 1', () => {
+      expect(prestamo.paginacionSchema.safeParse({ page: '0' }).success).toBe(false);
+    });
+
+    test('rechaza un parametro repetido (forma de arreglo), no toma "el primero"', () => {
+      const result = prestamo.paginacionSchema.safeParse({ page: ['1', '2'] });
+      expect(result.success).toBe(false);
+    });
+
+    test('rechaza query params desconocidos (.strict())', () => {
+      const result = prestamo.paginacionSchema.safeParse({ page: '1', ordenar: 'asc' });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('filtrosAdminPrestamoSchema (GET /admin/prestamos)', () => {
+    test('acepta filtros combinados validos', () => {
+      const result = prestamo.filtrosAdminPrestamoSchema.safeParse({
+        estado: 'PENDIENTE',
+        cliente_id: '7',
+        credito_id: '1',
+        fecha_desde: '2026-01-01',
+        fecha_hasta: '2026-01-31',
+        page: '2',
+        limit: '10'
+      });
+      expect(result.success).toBe(true);
+      expect(result.data).toMatchObject({
+        estado: 'PENDIENTE',
+        cliente_id: 7,
+        credito_id: 1,
+        fecha_desde: '2026-01-01',
+        fecha_hasta: '2026-01-31',
+        page: 2,
+        limit: 10
+      });
+    });
+
+    test('rechaza un estado fuera del enum', () => {
+      expect(prestamo.filtrosAdminPrestamoSchema.safeParse({ estado: 'LO_QUE_SEA' }).success).toBe(false);
+    });
+
+    test('rechaza fecha con formato invalido', () => {
+      expect(prestamo.filtrosAdminPrestamoSchema.safeParse({ fecha_desde: '01/01/2026' }).success).toBe(false);
+    });
+
+    test('rechaza una fecha de calendario imposible (2026-02-30)', () => {
+      expect(prestamo.filtrosAdminPrestamoSchema.safeParse({ fecha_desde: '2026-02-30' }).success).toBe(false);
+    });
+
+    test('rechaza fecha_desde posterior a fecha_hasta', () => {
+      const result = prestamo.filtrosAdminPrestamoSchema.safeParse({
+        fecha_desde: '2026-02-10',
+        fecha_hasta: '2026-02-01'
+      });
+      expect(result.success).toBe(false);
+    });
+
+    test('acepta fecha_desde igual a fecha_hasta (un solo dia)', () => {
+      const result = prestamo.filtrosAdminPrestamoSchema.safeParse({
+        fecha_desde: '2026-02-10',
+        fecha_hasta: '2026-02-10'
+      });
+      expect(result.success).toBe(true);
+    });
+
+    test('rechaza cliente_id/credito_id repetidos (forma de arreglo)', () => {
+      expect(prestamo.filtrosAdminPrestamoSchema.safeParse({ cliente_id: ['1', '2'] }).success).toBe(false);
+      expect(prestamo.filtrosAdminPrestamoSchema.safeParse({ estado: ['PENDIENTE', 'APROBADO'] }).success).toBe(
+        false
+      );
+    });
+
+    test('rechaza query params desconocidos (.strict())', () => {
+      const result = prestamo.filtrosAdminPrestamoSchema.safeParse({ estado: 'PENDIENTE', busqueda: 'x' });
+      expect(result.success).toBe(false);
+    });
+  });
 });

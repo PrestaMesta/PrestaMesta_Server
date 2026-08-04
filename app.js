@@ -15,6 +15,8 @@ const clientAuthRoutes = require('./routes/authRoutes');
 const adminAuthRoutes = require('./routes/adminAuthRoutes');
 const administradoresRoutes = require('./routes/administradoresRoutes');
 const prestamoRoutes = require('./routes/prestamoRoutes');
+const clientePrestamoRoutes = require('./routes/clientePrestamoRoutes');
+const adminPrestamoRoutes = require('./routes/adminPrestamoRoutes');
 
 const REQUEST_BODY_LIMIT = '10kb';
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
@@ -88,6 +90,8 @@ function createApp() {
   app.use('/api/v1/admin/auth', authRateLimiter, adminAuthRoutes);
   app.use('/api/v1/admin/administradores', administradoresRoutes);
   app.use('/api/v1/prestamos', prestamoRoutes);
+  app.use('/api/v1/client/prestamos', clientePrestamoRoutes);
+  app.use('/api/v1/admin/prestamos', adminPrestamoRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

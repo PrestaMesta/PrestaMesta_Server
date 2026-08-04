@@ -47,9 +47,71 @@ const idParamSchema = z.object({
   id: z.coerce.number().int().positive()
 });
 
+// --- Paginacion y filtros de los listados de prestamos (GET .../prestamos) ---
+//
+// Los query params llegan siempre como string (o arreglo de strings si el cliente repite
+// la misma clave, ej. `?page=1&page=2`). `unico()` rechaza explicitamente esa forma de
+// arreglo ANTES de intentar coerción de tipo: sustituye cualquier valor arreglo por NaN, que
+// despues falla la validacion de tipo del schema interno sin importar cual sea (numero,
+// enum o string con regex) -- asi un parametro repetido siempre termina en
+// VALIDATION_ERROR, nunca se usa "el primero" ni "el ultimo" en silencio.
+function unico(schemaInterno) {
+  return z.preprocess((valor) => (Array.isArray(valor) ? Number.NaN : valor), schemaInterno);
+}
+
+const PAGE_DEFAULT = 1;
+const LIMIT_DEFAULT = 20;
+const LIMIT_MAXIMO = 100;
+
+const paginacionSchema = z
+  .object({
+    page: unico(z.coerce.number().int().min(1)).default(PAGE_DEFAULT),
+    limit: unico(z.coerce.number().int().min(1).max(LIMIT_MAXIMO)).default(LIMIT_DEFAULT)
+  })
+  .strict();
+
+const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+// z.string().date() valida el formato pero no rechaza fechas de calendario imposibles como
+// "2026-02-30" en todas las versiones; se revalida reconstruyendo la fecha y comparando sus
+// componentes contra los originales.
+function esFechaCalendarioValida(fechaStr) {
+  const [anio, mes, dia] = fechaStr.split('-').map(Number);
+  const fecha = new Date(anio, mes - 1, dia);
+  return fecha.getFullYear() === anio && fecha.getMonth() === mes - 1 && fecha.getDate() === dia;
+}
+
+const fechaQuerySchema = unico(
+  z
+    .string()
+    .regex(FECHA_REGEX, 'Formato esperado YYYY-MM-DD')
+    .refine(esFechaCalendarioValida, 'Fecha invalida')
+).optional();
+
+const filtrosAdminPrestamoSchema = z
+  .object({
+    page: unico(z.coerce.number().int().min(1)).default(PAGE_DEFAULT),
+    limit: unico(z.coerce.number().int().min(1).max(LIMIT_MAXIMO)).default(LIMIT_DEFAULT),
+    estado: unico(z.enum(['PENDIENTE', 'APROBADO', 'RECHAZADO'])).optional(),
+    cliente_id: unico(z.coerce.number().int().positive()).optional(),
+    credito_id: unico(z.coerce.number().int().positive()).optional(),
+    fecha_desde: fechaQuerySchema,
+    fecha_hasta: fechaQuerySchema
+  })
+  .strict()
+  .refine(
+    (datos) => !datos.fecha_desde || !datos.fecha_hasta || datos.fecha_desde <= datos.fecha_hasta,
+    {
+      message: 'fecha_desde no puede ser posterior a fecha_hasta',
+      path: ['fecha_hasta']
+    }
+  );
+
 module.exports = {
   crearCreditoSchema,
   solicitarPrestamoSchema,
   cambiarEstadoSchema,
-  idParamSchema
+  idParamSchema,
+  paginacionSchema,
+  filtrosAdminPrestamoSchema
 };

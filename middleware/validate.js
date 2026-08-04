@@ -1,12 +1,16 @@
 const AppError = require('../utils/AppError');
 
-// Middleware generico de validacion. Solo soporta 'body' y 'params': ningun endpoint
-// actual usa query params, y en Express 5 sobreescribir req.query no esta garantizado
-// (es una propiedad derivada), asi que se evita ese caso hasta que exista una necesidad
-// real en vez de anadir soporte especulativo sin poder probarlo.
+// Middleware generico de validacion. Soporta 'body', 'params' y 'query'.
+//
+// 'query' es un caso especial: en Express 5, `req.query` es una propiedad derivada y
+// reasignarla (`req.query = result.data`) no persiste de forma garantizada (verificado
+// empiricamente: una reasignacion directa se pierde silenciosamente). Por eso, cuando
+// source es 'query', el resultado parseado/coercionado se escribe en `req.queryValidada`
+// en vez de sobreescribir `req.query`; los controladores que necesitan query params ya
+// validados leen de ahi.
 function validate(schema, source = 'body') {
-  if (source !== 'body' && source !== 'params') {
-    throw new Error(`validate(): source "${source}" no soportado (usa "body" o "params")`);
+  if (source !== 'body' && source !== 'params' && source !== 'query') {
+    throw new Error(`validate(): source "${source}" no soportado (usa "body", "params" o "query")`);
   }
 
   return (req, res, next) => {
@@ -20,7 +24,12 @@ function validate(schema, source = 'body') {
         new AppError(400, 'VALIDATION_ERROR', 'Los datos enviados no son validos.', detalles)
       );
     }
-    req[source] = result.data;
+
+    if (source === 'query') {
+      req.queryValidada = result.data;
+    } else {
+      req[source] = result.data;
+    }
     next();
   };
 }

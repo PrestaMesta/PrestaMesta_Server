@@ -54,3 +54,54 @@ exports.cambiarEstadoPrestamo = async (req, res, next) => {
     next(error);
   }
 };
+
+// 5. [CLIENTE] Listar los prestamos propios (cliente_id sale del JWT, nunca de query/body)
+exports.listarPrestamosCliente = async (req, res, next) => {
+  try {
+    const clienteId = Number(req.usuario.sub);
+    const { page, limit } = req.queryValidada;
+    const resultado = await prestamoService.listarPrestamosCliente({ clienteId, page, limit });
+    res.json(resultado);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 6. [CLIENTE] Detalle de un prestamo propio
+exports.obtenerPrestamoCliente = async (req, res, next) => {
+  try {
+    const clienteId = Number(req.usuario.sub);
+    const prestamoId = req.params.id;
+    const resultado = await prestamoService.obtenerPrestamoCliente({ clienteId, prestamoId });
+    res.json(resultado);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 7. [ADMIN: SUPERADMIN/ANALISTA] Listado administrativo con filtros y paginacion
+exports.listarPrestamosAdmin = async (req, res, next) => {
+  try {
+    const { page, limit, estado, cliente_id: clienteId, credito_id: creditoId, fecha_desde: fechaDesde, fecha_hasta: fechaHasta } =
+      req.queryValidada;
+    const resultado = await prestamoService.listarPrestamosAdmin({
+      filtros: { estado, clienteId, creditoId, fechaDesde, fechaHasta },
+      page,
+      limit
+    });
+    res.json(resultado);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 8. [ADMIN: SUPERADMIN/ANALISTA] Detalle administrativo (incluye credito y aval)
+exports.obtenerPrestamoAdmin = async (req, res, next) => {
+  try {
+    const prestamoId = req.params.id;
+    const resultado = await prestamoService.obtenerPrestamoAdmin({ prestamoId });
+    res.json(resultado);
+  } catch (error) {
+    next(error);
+  }
+};
