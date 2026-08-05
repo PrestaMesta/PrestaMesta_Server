@@ -2,10 +2,10 @@
 
 Backend de Prestamesta: Express + MySQL (datos transaccionales) + MongoDB (auditoria).
 Ver `CLAUDE.md` para arquitectura interna y comandos de desarrollo. El contrato completo
-de la API vive en `openapi.yaml` (validalo con `npm run docs:validate`): 12 endpoints
-versionados bajo `/api/v1` (autenticacion de cliente y admin, alta de administradores,
-catalogo de creditos, solicitud/aprobacion/consulta de prestamos) mas `/health/live` y
-`/health/ready`, sin versionar.
+de la API vive en `openapi.yaml` (validalo con `npm run docs:validate`): 18 endpoints
+versionados bajo `/api/v1` (autenticacion + MFA de cliente y admin, alta de
+administradores, catalogo de creditos, solicitud/aprobacion/consulta de prestamos) mas
+`/health/live` y `/health/ready`, sin versionar.
 
 ### Requisitos locales
 
@@ -24,11 +24,69 @@ propio, no reutilizado entre entornos).
 
 Roles de administrador: `SUPERADMIN`, `ANALISTA`, `COBRADOR`.
 
-### Autenticacion
+### Autenticacion y MFA
 
 Cliente y administrador son dos dominios de identidad separados, con tokens JWT de
 audiencias distintas: un token de cliente nunca es aceptado en una ruta administrativa, y
 viceversa.
+
+**MFA (TOTP) es obligatorio para ambos dominios (Checkpoint 6B-2) — cambio de contrato
+incompatible hacia atras.** `POST .../auth/login` ya NO devuelve un token de sesion
+utilizable de inmediato: devuelve un `preMfaToken` de vida corta (5 min por defecto) y
+`siguientePaso`, que indica el paso siguiente:
+
+**Login cliente** (`POST http://localhost:3000/api/v1/client/auth/login`)
+```json
+{ "email": "juan@example.com", "password": "miPasswordSeguro123" }
+```
+```json
+{
+  "mensaje": "Completa el enrolamiento de MFA para continuar.",
+  "preMfaToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "siguientePaso": "MFA_ENROLLMENT_REQUIRED",
+  "mfaEstado": "NO_ENROLADO"
+}
+```
+(`siguientePaso: "MFA_CHALLENGE_REQUIRED"` si el MFA ya estaba activo — ver mas abajo. El
+`preMfaToken` **no funciona en ninguna otra ruta**, solo en las tres de abajo.)
+
+**Si `MFA_ENROLLMENT_REQUIRED`** (primera vez): iniciar enrolamiento con el `preMfaToken`
+(`Authorization: Bearer <preMfaToken>`):
+
+`POST http://localhost:3000/api/v1/client/auth/mfa/enroll` (sin body) devuelve
+`{ secreto, otpauthUri }` — muestra `otpauthUri` como QR (Google Authenticator/Authy/etc.),
+o `secreto` como respaldo manual. Ninguno de los dos se puede volver a recuperar despues.
+
+`POST http://localhost:3000/api/v1/client/auth/mfa/enroll/confirm` con el primer codigo de
+6 digitos generado por la app:
+```json
+{ "codigo": "123456" }
+```
+Activa el MFA, devuelve **10 codigos de recuperacion en claro (una unica vez, guardarlos)**
+y ya el token de sesion completo:
+```json
+{ "mensaje": "MFA activado exitosamente...", "token": "eyJ...", "codigosRecuperacion": ["A1B2-C3D4-E5F6-0708-090A", "..."] }
+```
+
+**Si `MFA_CHALLENGE_REQUIRED`** (MFA ya activo, logins siguientes): verificar con el
+`preMfaToken`:
+
+`POST http://localhost:3000/api/v1/client/auth/mfa/verify`, exactamente uno de los dos:
+```json
+{ "codigo": "123456" }
+```
+```json
+{ "codigoRecuperacion": "A1B2-C3D4-E5F6-0708-090A" }
+```
+Devuelve `{ mensaje, token }` — ese `token` (audiencia normal, `token_use: session`) es el
+que se usa como `Authorization: Bearer <token>` en el resto de la API. Un mismo codigo TOTP
+nunca se acepta dos veces (`401 MFA_CODE_REUSED`); un codigo de recuperacion es de un solo
+uso (`401 RECOVERY_CODE_ALREADY_USED`). `mfa/enroll/confirm` y `mfa/verify` tienen un rate
+limit propio (`MFA_RATE_LIMIT_WINDOW_MS`/`MFA_RATE_LIMIT_MAX`, `429 MFA_RATE_LIMITED`).
+
+Exactamente el mismo flujo aplica a `/api/v1/admin/auth/login` +
+`/api/v1/admin/auth/mfa/*` — incluido el `SUPERADMIN` recien sembrado (ver abajo), sin
+excepcion: su primer login tambien responde `MFA_ENROLLMENT_REQUIRED`.
 
 El primer `SUPERADMIN` se crea unicamente con un script offline, nunca via HTTP:
 
@@ -39,10 +97,11 @@ SUPERADMIN_PASSWORD="AdminSuperSeguro123" \
 npm run seed:superadmin
 ```
 
-A partir de ahi, un `SUPERADMIN` autenticado puede crear mas administradores:
+A partir de ahi, un `SUPERADMIN` autenticado (sesion completa, ya con MFA hecho) puede
+crear mas administradores:
 
 **Crear administrador** (`POST http://localhost:3000/api/v1/admin/administradores`,
-requiere `Authorization: Bearer <token de un SUPERADMIN>`)
+requiere `Authorization: Bearer <token de sesion de un SUPERADMIN>`)
 ```json
 {
   "nombre": "Nuevo Analista",
@@ -52,15 +111,8 @@ requiere `Authorization: Bearer <token de un SUPERADMIN>`)
 }
 ```
 
-**Login admin** (`POST http://localhost:3000/api/v1/admin/auth/login`)
-```json
-{
-  "email": "admin@prestamesta.com",
-  "password": "AdminSuperSeguro123"
-}
-```
-
-**Registro cliente** (`POST http://localhost:3000/api/v1/client/auth/register`)
+**Registro cliente** (`POST http://localhost:3000/api/v1/client/auth/register`, sin
+cambios — el MFA se enrola en el primer login, no en el registro)
 ```json
 {
   "nombre": "Juan Pérez",
@@ -70,13 +122,7 @@ requiere `Authorization: Bearer <token de un SUPERADMIN>`)
 }
 ```
 
-**Login cliente** (`POST http://localhost:3000/api/v1/client/auth/login`)
-```json
-{
-  "email": "juan@example.com",
-  "password": "miPasswordSeguro123"
-}
-```
+Step-up e identidad INE (`docs/mfa-identidad-ine.md`) todavia no estan implementados.
 
 ### Consultar prestamos
 

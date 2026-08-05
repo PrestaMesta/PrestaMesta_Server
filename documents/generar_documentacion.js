@@ -276,7 +276,14 @@ const DESCRIPCION_CODIGO = {
   LOAN_NOT_FOUND: 'El id de préstamo enviado no existe.',
   INVALID_TRANSITION: 'El préstamo ya no está en estado PENDIENTE (ya fue aprobado o rechazado antes).',
   NOT_FOUND: 'La ruta solicitada no existe.',
-  INTERNAL_ERROR: 'Error no esperado del servidor; nunca incluye detalles internos (SQL, Mongo, stack traces).'
+  INTERNAL_ERROR: 'Error no esperado del servidor; nunca incluye detalles internos (SQL, Mongo, stack traces).',
+  MFA_ENROLLMENT_REQUIRED: 'El MFA no esta activo para esta cuenta: hay que llamar a mfa/enroll + mfa/enroll/confirm antes de continuar (o mfa/verify se llamo sin haber enrolado).',
+  MFA_CHALLENGE_REQUIRED: 'El MFA ya esta activo para esta cuenta: hay que llamar a mfa/verify (mfa/enroll no puede re-enrolar sin step-up, no implementado todavia).',
+  MFA_ENROLLMENT_INVALID: 'El codigo TOTP enviado a mfa/enroll/confirm es incorrecto, ya expiro, o ya fue utilizado.',
+  MFA_INVALID_CODE: 'El codigo TOTP o de recuperacion enviado a mfa/verify es incorrecto.',
+  MFA_CODE_REUSED: 'El codigo TOTP enviado a mfa/verify ya fue aceptado antes (mismo paso de 30s); nunca se acepta dos veces.',
+  RECOVERY_CODE_ALREADY_USED: 'El codigo de recuperacion enviado a mfa/verify ya fue consumido antes; cada codigo es de un solo uso.',
+  MFA_RATE_LIMITED: 'Demasiados intentos contra mfa/verify o mfa/enroll/confirm desde la misma IP en la ventana configurada (MFA_RATE_LIMIT_WINDOW_MS/MFA_RATE_LIMIT_MAX).'
 };
 
 async function construirSecciones(api) {

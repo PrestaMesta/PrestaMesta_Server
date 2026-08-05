@@ -34,4 +34,14 @@ async function obtenerActivoPorId(id) {
   return admin;
 }
 
-module.exports = { existePorEmail, crear, obtenerPorEmail, obtenerActivoPorId };
+// Usado para reconstruir el perfil minimo (id/nombre/email/rol) en las respuestas que
+// completan MFA (mfa/enroll/confirm, mfa/verify, Checkpoint 6B-2 revision) -- nunca
+// password. Distinto de obtenerActivoPorId: ese es la fuente de verdad para AUTORIZAR
+// (exige activo=TRUE), este solo arma el perfil a devolver una vez que la autorizacion ya
+// se resolvio por otra via (cargarAdministradorActual, en la misma peticion).
+async function obtenerPorId(id) {
+  const [rows] = await pool.query('SELECT id, nombre, email, rol FROM administradores WHERE id = ?', [id]);
+  return rows[0] || null;
+}
+
+module.exports = { existePorEmail, crear, obtenerPorEmail, obtenerActivoPorId, obtenerPorId };

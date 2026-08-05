@@ -13,6 +13,17 @@ info:
     (`prestamesta-client` / `prestamesta-admin`): un token de un dominio nunca es
     aceptado por rutas del otro dominio, aunque la firma sea valida. Ver
     securitySchemes.bearerAuth.
+
+
+    **MFA obligatorio (Checkpoint 6B-2).** Login (`POST .../auth/login`) ya NO devuelve un
+    token de sesion utilizable de inmediato: devuelve un `preMfaToken` de vida corta
+    (audiencia `*-pre-mfa`, claim `token_use: pre_mfa`) que solo sirve contra
+    `mfa/enroll`, `mfa/enroll/confirm` y `mfa/verify` del mismo dominio. El token de sesion
+    completo (`token_use: session`, claims `amr`/`auth_time`) solo se emite al completar el
+    enrolamiento o el desafio MFA. Este es un cambio de contrato **incompatible hacia
+    atras** respecto a versiones previas de este documento, sin capa de compatibilidad
+    temporal — ver `docs/mfa-identidad-ine.md` para el diseño completo (step-up e
+    identidad INE siguen sin implementarse).
 servers:
   - url: /api/v1
 security:
@@ -57,8 +68,20 @@ paths:
   /client/auth/login:
     post:
       tags: [auth-cliente]
-      summary: Autentica a un cliente
-      description: Devuelve un token con audiencia `prestamesta-client`.
+      summary: Verifica el password de un cliente e inicia el flujo de MFA
+      description: >
+        **Checkpoint 6B-2 — cambio de contrato incompatible hacia atras.** Este endpoint ya
+        NO devuelve un token de sesion utilizable de inmediato. Tras confirmar el password,
+        devuelve un `preMfaToken` (audiencia `prestamesta-client-pre-mfa`,
+        `token_use: pre_mfa`, vida corta) y el discriminador `siguientePaso`. El cliente
+        HTTP debe usar ese valor (nunca inferirlo de `mfaEstado`) para decidir el siguiente
+        paso:
+          - `MFA_ENROLLMENT_REQUIRED` -> llamar a `POST /client/auth/mfa/enroll`.
+          - `MFA_CHALLENGE_REQUIRED` -> llamar a `POST /client/auth/mfa/verify`.
+
+        El `preMfaToken` **no sirve para ninguna otra ruta**: ni para rutas de negocio
+        (`/client/prestamos/*`, etc.) ni para ninguna ruta que exija una sesion completa.
+        Solo lo aceptan `mfa/enroll`, `mfa/enroll/confirm` y `mfa/verify`.
       security: []
       requestBody:
         required: true
@@ -71,25 +94,130 @@ paths:
               password: miPasswordSeguro123
       responses:
         '200':
-          description: Autenticacion exitosa
+          description: Password correcto — continua con el flujo de MFA indicado en `siguientePaso`
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  mensaje: { type: string, example: Autenticación exitosa }
-                  token: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
-                  cliente:
-                    type: object
-                    properties:
-                      id: { type: integer, example: 1 }
-                      nombre: { type: string, example: Juan Pérez }
-                      email: { type: string, format: email, example: juan@example.com }
+              schema: { $ref: '#/components/schemas/LoginPreMfaResponse' }
         '401':
           description: >
             Credenciales invalidas (codigo INVALID_CREDENTIALS). Se devuelve el mismo
             status y mensaje generico tanto si el correo no existe como si el password es
-            incorrecto, para no revelar si un correo esta registrado.
+            incorrecto, para no revelar si un correo esta registrado. Este chequeo ocurre
+            antes de consultar el estado de MFA.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /client/auth/mfa/enroll:
+    post:
+      tags: [auth-cliente]
+      summary: Inicia el enrolamiento TOTP (genera un secreto nuevo)
+      description: >
+        Auth: `preMfaToken`. Genera un secreto TOTP aleatorio, lo cifra (AES-256-GCM) y lo
+        persiste como `PENDIENTE_CONFIRMACION`. El secreto en claro y la URI `otpauth://`
+        (para el QR) solo se devuelven **en esta respuesta** — nunca se pueden volver a
+        recuperar en claro despues. Si el MFA de la cuenta ya esta `ACTIVO`, responde 409
+        `MFA_CHALLENGE_REQUIRED` (un `preMfaToken` no puede re-enrolar una cuenta que ya
+        tiene MFA activo; eso requiere sesion completa + step-up, no implementado todavia).
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201':
+          description: Secreto generado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaEnrollResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: El MFA ya esta activo para esta cuenta (codigo MFA_CHALLENGE_REQUIRED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /client/auth/mfa/enroll/confirm:
+    post:
+      tags: [auth-cliente]
+      summary: Confirma el primer codigo TOTP y activa el MFA
+      description: >
+        Auth: `preMfaToken`. Valida el primer codigo TOTP contra el secreto pendiente. Si es
+        correcto: activa el MFA, genera 10 codigos de recuperacion (devueltos en claro
+        **unicamente en esta respuesta**, luego solo se guardan hasheados) y emite el token
+        de sesion completo (`token_use: session`, `amr: [pwd, totp]`) — este es el paso que
+        completa el login para quien enrola por primera vez. Rate-limited
+        (`middleware/rateLimiters.js#mfaRateLimiter`).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaEnrollConfirmInput' }
+      responses:
+        '200':
+          description: MFA activado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaSessionResponseCliente' }
+        '400':
+          description: >
+            Codigo de confirmacion invalido o ya utilizado (codigo MFA_ENROLLMENT_INVALID),
+            o el body no cumple el schema (codigo VALIDATION_ERROR)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: No hay un enrolamiento pendiente de confirmar (codigo MFA_ENROLLMENT_REQUIRED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Demasiados intentos (codigo MFA_RATE_LIMITED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /client/auth/mfa/verify:
+    post:
+      tags: [auth-cliente]
+      summary: Completa el login verificando un codigo TOTP o de recuperacion
+      description: >
+        Auth: `preMfaToken`. Body: exactamente uno de `codigo` (TOTP, tolerancia ±1 paso de
+        30s, un mismo codigo nunca se acepta dos veces) o `codigoRecuperacion` (un solo uso).
+        Si es valido, emite el token de sesion completo (`amr: [pwd, totp]` o
+        `[pwd, recovery]` segun el factor usado). Rate-limited
+        (`middleware/rateLimiters.js#mfaRateLimiter`), independiente del bloqueo por cuenta
+        tras varios intentos fallidos.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaVerifyInput' }
+      responses:
+        '200':
+          description: Autenticacion exitosa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaSessionResponseCliente' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          description: >
+            Codigo TOTP/recuperacion invalido (codigo MFA_INVALID_CODE), el mismo codigo
+            TOTP ya fue utilizado (codigo MFA_CODE_REUSED), o el codigo de recuperacion ya
+            estaba consumido (codigo RECOVERY_CODE_ALREADY_USED) — o el token no es un
+            preMfaToken valido (codigo TOKEN_INVALID/TOKEN_EXPIRED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: El MFA no esta activo para esta cuenta (codigo MFA_ENROLLMENT_REQUIRED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Demasiados intentos (codigo MFA_RATE_LIMITED)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -97,11 +225,15 @@ paths:
   /admin/auth/login:
     post:
       tags: [auth-admin]
-      summary: Autentica a un administrador
+      summary: Verifica el password de un administrador e inicia el flujo de MFA
       description: >
-        Unico endpoint publico bajo /admin/auth: crear administradores NO es una
-        operacion de autenticacion (ver POST /admin/administradores). Devuelve un token
-        con audiencia `prestamesta-admin`.
+        Unico endpoint publico bajo /admin/auth: crear administradores NO es una operacion
+        de autenticacion (ver POST /admin/administradores). **Checkpoint 6B-2 — mismo
+        cambio de contrato que `/client/auth/login`**: ya no devuelve un token de sesion
+        directo, devuelve un `preMfaToken` (audiencia `prestamesta-admin-pre-mfa`) +
+        `siguientePaso`. Aplica igual al SUPERADMIN recien sembrado por
+        `npm run seed:superadmin`: su primer login tambien responde
+        `MFA_ENROLLMENT_REQUIRED`, sin caso especial.
       security: []
       requestBody:
         required: true
@@ -114,26 +246,117 @@ paths:
               password: AdminSuperSeguro123
       responses:
         '200':
-          description: Autenticacion exitosa
+          description: Password correcto — continua con el flujo de MFA indicado en `siguientePaso`
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  mensaje: { type: string, example: Autenticación de administrador exitosa }
-                  token: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
-                  admin:
-                    type: object
-                    properties:
-                      id: { type: integer, example: 1 }
-                      nombre: { type: string, example: Admin Principal }
-                      email: { type: string, format: email, example: admin@prestamesta.com }
-                      rol: { $ref: '#/components/schemas/Rol' }
+              schema: { $ref: '#/components/schemas/LoginPreMfaResponse' }
         '401':
           description: >
             Credenciales invalidas o cuenta desactivada (codigo INVALID_CREDENTIALS).
             Mismo status/mensaje generico para correo inexistente, password incorrecto y
             cuenta con activo=false: no se revela cual de los tres paso.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/auth/mfa/enroll:
+    post:
+      tags: [auth-admin]
+      summary: Inicia el enrolamiento TOTP de un administrador
+      description: >
+        Auth: `preMfaToken` de admin. Mismo comportamiento que
+        `POST /client/auth/mfa/enroll`, dominio administrador. Ademas relee `rol`/`activo`
+        directo de BD (`middleware/cargarAdministradorActual.js`) antes de continuar: si el
+        administrador fue desactivado entre el login y este paso, responde
+        401 TOKEN_INVALID.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201':
+          description: Secreto generado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaEnrollResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: El MFA ya esta activo para esta cuenta (codigo MFA_CHALLENGE_REQUIRED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/auth/mfa/enroll/confirm:
+    post:
+      tags: [auth-admin]
+      summary: Confirma el primer codigo TOTP y activa el MFA de un administrador
+      description: >
+        Auth: `preMfaToken` de admin. Mismo comportamiento que
+        `POST /client/auth/mfa/enroll/confirm`. El `rol` del token de sesion nuevo sale de
+        `middleware/cargarAdministradorActual.js` (releido de BD), nunca del `preMfaToken`
+        (que no incluye `rol` a proposito).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaEnrollConfirmInput' }
+      responses:
+        '200':
+          description: MFA activado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaSessionResponseAdmin' }
+        '400':
+          description: Codigo invalido/ya utilizado (MFA_ENROLLMENT_INVALID) o body invalido (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: No hay un enrolamiento pendiente de confirmar (codigo MFA_ENROLLMENT_REQUIRED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Demasiados intentos (codigo MFA_RATE_LIMITED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/auth/mfa/verify:
+    post:
+      tags: [auth-admin]
+      summary: Completa el login de administrador verificando un codigo TOTP o de recuperacion
+      description: >
+        Auth: `preMfaToken` de admin. Mismo comportamiento que `POST /client/auth/mfa/verify`.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaVerifyInput' }
+      responses:
+        '200':
+          description: Autenticacion exitosa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaSessionResponseAdmin' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          description: >
+            Codigo invalido (MFA_INVALID_CODE), codigo TOTP reutilizado (MFA_CODE_REUSED),
+            o codigo de recuperacion ya consumido (RECOVERY_CODE_ALREADY_USED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: El MFA no esta activo para esta cuenta (codigo MFA_ENROLLMENT_REQUIRED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Demasiados intentos (codigo MFA_RATE_LIMITED)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -576,6 +799,13 @@ components:
             - INVALID_TRANSITION
             - NOT_FOUND
             - INTERNAL_ERROR
+            - MFA_ENROLLMENT_REQUIRED
+            - MFA_CHALLENGE_REQUIRED
+            - MFA_ENROLLMENT_INVALID
+            - MFA_INVALID_CODE
+            - MFA_CODE_REUSED
+            - RECOVERY_CODE_ALREADY_USED
+            - MFA_RATE_LIMITED
           example: INVALID_CREDENTIALS
         requestId: { type: string, example: 3fa3a1c2-9c2b-4e9e-8b34-1a2b3c4d5e6f }
         detalles:
@@ -638,6 +868,134 @@ components:
         email: { type: string, format: email }
         password: { type: string }
       additionalProperties: false
+
+    SiguientePasoMfa:
+      type: string
+      enum: [MFA_ENROLLMENT_REQUIRED, MFA_CHALLENGE_REQUIRED]
+      example: MFA_CHALLENGE_REQUIRED
+      description: >
+        Discriminador explicito que decide el siguiente paso del flujo de login. El cliente
+        HTTP debe ramificar su UI a partir de este valor, nunca inferirlo de `mfaEstado`
+        (que es informativo/depuracion). `MFA_ENROLLMENT_REQUIRED` cuando el MFA no esta
+        `ACTIVO` (incluye `NO_ENROLADO` y `PENDIENTE_CONFIRMACION`); `MFA_CHALLENGE_REQUIRED`
+        cuando ya esta `ACTIVO`.
+
+    LoginPreMfaResponse:
+      type: object
+      description: >
+        Checkpoint 6B-2: shape nuevo de `POST /client/auth/login` y `POST /admin/auth/login`
+        tras un password correcto. Reemplaza por completo la respuesta anterior (que incluia
+        `token` utilizable de inmediato) — cambio de contrato incompatible hacia atras, sin
+        capa de compatibilidad temporal.
+      properties:
+        mensaje: { type: string, example: Verifica tu identidad para continuar. }
+        preMfaToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+          description: >
+            Token de vida corta (`PRE_MFA_EXPIRES_IN`, default 5 minutos), audiencia
+            `*-pre-mfa` y `token_use: pre_mfa`. Solo sirve contra `mfa/enroll`,
+            `mfa/enroll/confirm` y `mfa/verify` del mismo dominio (cliente o admin) — ninguna
+            otra ruta lo acepta.
+        siguientePaso: { $ref: '#/components/schemas/SiguientePasoMfa' }
+        mfaEstado:
+          type: string
+          enum: [NO_ENROLADO, PENDIENTE_CONFIRMACION, ACTIVO]
+          example: ACTIVO
+          description: Estado crudo subyacente, informativo — la UI decide a partir de `siguientePaso`, no de este campo.
+
+    MfaEnrollResponse:
+      type: object
+      description: >
+        El secreto en claro y la URI otpauth:// se devuelven UNICAMENTE en esta respuesta.
+        Ninguno de los dos se vuelve a exponer despues (se persisten cifrados, AES-256-GCM).
+      properties:
+        mensaje: { type: string, example: Escanea el codigo QR con tu aplicacion de autenticacion. }
+        secreto:
+          type: string
+          example: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+          description: Secreto TOTP en base32, para mostrar como respaldo manual si el usuario no puede escanear el QR.
+        otpauthUri:
+          type: string
+          example: 'otpauth://totp/Prestamesta:juan%40example.com?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Prestamesta&algorithm=SHA1&digits=6&period=30'
+          description: URI estandar otpauth:// (RFC 6238), para renderizar como QR.
+
+    MfaEnrollConfirmInput:
+      type: object
+      required: [codigo]
+      properties:
+        codigo:
+          type: string
+          pattern: '^\d{6}$'
+          example: '123456'
+          description: Codigo TOTP de 6 digitos, del secreto recien generado por mfa/enroll.
+      additionalProperties: false
+
+    MfaVerifyInput:
+      type: object
+      description: Exactamente uno de los dos campos, nunca ambos ni ninguno.
+      properties:
+        codigo:
+          type: string
+          pattern: '^\d{6}$'
+          example: '123456'
+          description: Codigo TOTP de 6 digitos del secreto ya activo.
+        codigoRecuperacion:
+          type: string
+          example: 'A1B2-C3D4-E5F6-0708-090A'
+          description: Codigo de recuperacion de un solo uso, entregado al confirmar el enrolamiento.
+      additionalProperties: false
+
+    MfaSessionResponseCliente:
+      type: object
+      description: >
+        Respuesta de `client/auth/mfa/enroll/confirm` y `client/auth/mfa/verify` cuando el
+        MFA se completa con exito: emite el token de SESION completo (`token_use: session`,
+        `amr`, `auth_time` — ver la seccion 2/3.6 de docs/mfa-identidad-ine.md).
+        `codigosRecuperacion` solo aparece en la respuesta de `mfa/enroll/confirm` (nunca en
+        `mfa/verify`): son el lote nuevo generado al activar el MFA, en claro, una unica
+        vez. `cliente` (perfil minimo, igual shape que devolvia el login previo a
+        Checkpoint 6B-2) va en esta respuesta porque no existe un endpoint `/me`: es la
+        primera vez que el cliente HTTP tiene un token de sesion utilizable y necesita
+        datos para construir la sesion local. El `preMfaToken` usado para llegar hasta aqui
+        NUNCA aparece en esta respuesta (ya cumplio su proposito).
+      properties:
+        mensaje: { type: string, example: Autenticacion exitosa. }
+        token: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
+        cliente:
+          type: object
+          properties:
+            id: { type: integer, example: 1 }
+            nombre: { type: string, example: Juan Pérez }
+            email: { type: string, format: email, example: juan@example.com }
+        codigosRecuperacion:
+          type: array
+          items: { type: string, example: 'A1B2-C3D4-E5F6-0708-090A' }
+          minItems: 10
+          maxItems: 10
+
+    MfaSessionResponseAdmin:
+      type: object
+      description: >
+        Equivalente a MfaSessionResponseCliente para `admin/auth/mfa/enroll/confirm` y
+        `admin/auth/mfa/verify`. `admin.rol` sale siempre de la relectura en BD de
+        `middleware/cargarAdministradorActual.js` (nunca del token pre-MFA, que no incluye
+        `rol` a proposito).
+      properties:
+        mensaje: { type: string, example: Autenticacion exitosa. }
+        token: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
+        admin:
+          type: object
+          properties:
+            id: { type: integer, example: 1 }
+            nombre: { type: string, example: Admin Principal }
+            email: { type: string, format: email, example: admin@prestamesta.com }
+            rol: { $ref: '#/components/schemas/Rol' }
+        codigosRecuperacion:
+          type: array
+          items: { type: string, example: 'A1B2-C3D4-E5F6-0708-090A' }
+          minItems: 10
+          maxItems: 10
 
     Credito:
       type: object

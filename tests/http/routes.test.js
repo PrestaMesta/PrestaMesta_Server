@@ -8,7 +8,7 @@ const { createApp } = require('../../app');
 const administradorRepository = require('../../repositories/administradorRepository');
 const prestamoRepository = require('../../repositories/prestamoRepository');
 const auditoriaRepository = require('../../repositories/auditoriaRepository');
-const { signAdminToken, signClienteToken } = require('../../utils/jwt');
+const { signAdminSessionToken, signClienteSessionToken } = require('../../utils/jwt');
 
 auditoriaRepository.registrar.mockResolvedValue(undefined);
 
@@ -23,7 +23,7 @@ const bearer = (token) => `Bearer ${token}`;
 
 describe('separacion de audiencias cliente/admin (rutas reales, via createApp())', () => {
   test('un token de CLIENTE es rechazado en una ruta administrativa', async () => {
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
     const res = await request(app)
       .post('/api/v1/admin/administradores')
       .set('Authorization', bearer(token))
@@ -34,7 +34,7 @@ describe('separacion de audiencias cliente/admin (rutas reales, via createApp())
   });
 
   test('un token de ADMIN es rechazado en una ruta exclusiva de cliente', async () => {
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
     const res = await request(app)
       .post('/api/v1/prestamos/solicitar')
       .set('Authorization', bearer(token))
@@ -56,7 +56,7 @@ describe('separacion de audiencias cliente/admin (rutas reales, via createApp())
 describe('re-verificacion en base de datos para acciones administrativas sensibles', () => {
   test('un administrador desactivado despues de emitir el token no puede actuar', async () => {
     administradorRepository.obtenerActivoPorId.mockResolvedValue(null);
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .post('/api/v1/admin/administradores')
@@ -70,7 +70,7 @@ describe('re-verificacion en base de datos para acciones administrativas sensibl
   test('un administrador cuyo rol cambio (SUPERADMIN -> ANALISTA) ya no puede crear administradores', async () => {
     // El token todavia dice SUPERADMIN (se emitio antes del cambio); la BD ya dice ANALISTA.
     administradorRepository.obtenerActivoPorId.mockResolvedValue({ id: 1, rol: 'ANALISTA', activo: 1 });
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .post('/api/v1/admin/administradores')
@@ -85,7 +85,7 @@ describe('re-verificacion en base de datos para acciones administrativas sensibl
 describe('matriz de roles', () => {
   test('ANALISTA no puede crear un administrador', async () => {
     administradorRepository.obtenerActivoPorId.mockResolvedValue({ id: 2, rol: 'ANALISTA', activo: 1 });
-    const token = signAdminToken(ANALISTA);
+    const token = signAdminSessionToken(ANALISTA);
 
     const res = await request(app)
       .post('/api/v1/admin/administradores')
@@ -97,7 +97,7 @@ describe('matriz de roles', () => {
 
   test('COBRADOR no puede aprobar un prestamo', async () => {
     administradorRepository.obtenerActivoPorId.mockResolvedValue({ id: 3, rol: 'COBRADOR', activo: 1 });
-    const token = signAdminToken(COBRADOR);
+    const token = signAdminSessionToken(COBRADOR);
 
     const res = await request(app)
       .patch('/api/v1/prestamos/1/estado')
@@ -111,7 +111,7 @@ describe('matriz de roles', () => {
     administradorRepository.obtenerActivoPorId.mockResolvedValue({ id: 1, rol: 'SUPERADMIN', activo: 1 });
     administradorRepository.existePorEmail.mockResolvedValue(false);
     administradorRepository.crear.mockResolvedValue(55);
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .post('/api/v1/admin/administradores')
@@ -130,7 +130,7 @@ describe('prestamos: 404 vs 409, y validacion estricta', () => {
 
   test('un prestamo inexistente devuelve 404 LOAN_NOT_FOUND (no 409)', async () => {
     prestamoRepository.cambiarEstado.mockResolvedValue({ resultado: 'NO_ENCONTRADO' });
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .patch('/api/v1/prestamos/999/estado')
@@ -143,7 +143,7 @@ describe('prestamos: 404 vs 409, y validacion estricta', () => {
 
   test('un prestamo ya procesado devuelve 409 INVALID_TRANSITION (no 404)', async () => {
     prestamoRepository.cambiarEstado.mockResolvedValue({ resultado: 'TRANSICION_INVALIDA', estadoActual: 'APROBADO' });
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .patch('/api/v1/prestamos/1/estado')
@@ -155,7 +155,7 @@ describe('prestamos: 404 vs 409, y validacion estricta', () => {
   });
 
   test('rechaza cliente_id/rol/monto_total_a_pagar en el body de solicitar antes de llegar al servicio', async () => {
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app)
       .post('/api/v1/prestamos/solicitar')
@@ -169,7 +169,7 @@ describe('prestamos: 404 vs 409, y validacion estricta', () => {
 
   test('rechaza un password que excede el limite seguro de bcrypt al crear administrador', async () => {
     administradorRepository.obtenerActivoPorId.mockResolvedValue({ id: 1, rol: 'SUPERADMIN', activo: 1 });
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .post('/api/v1/admin/administradores')
@@ -193,7 +193,7 @@ describe('errores internos nunca filtran detalles', () => {
     prestamoRepository.listarCreditos.mockRejectedValue(
       new Error('ER_ACCESS_DENIED_ERROR: password incorrecto para root@host')
     );
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app).get('/api/v1/prestamos/creditos').set('Authorization', bearer(token));
 

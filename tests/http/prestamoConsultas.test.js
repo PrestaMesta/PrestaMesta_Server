@@ -6,7 +6,7 @@ const request = require('supertest');
 const { createApp } = require('../../app');
 const prestamoRepository = require('../../repositories/prestamoRepository');
 const administradorRepository = require('../../repositories/administradorRepository');
-const { signClienteToken, signAdminToken } = require('../../utils/jwt');
+const { signClienteSessionToken, signAdminSessionToken } = require('../../utils/jwt');
 
 const app = createApp();
 
@@ -72,7 +72,7 @@ describe('GET /api/v1/client/prestamos', () => {
       rows: [filaPrestamoCliente()],
       total: 1
     });
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/client/prestamos').set('Authorization', bearer(token));
 
@@ -88,7 +88,7 @@ describe('GET /api/v1/client/prestamos', () => {
 
   test('el cliente no puede alterar de quien consulta via query (cliente_id ignorado si se envia)', async () => {
     prestamoRepository.listarPrestamosPorCliente.mockResolvedValue({ rows: [], total: 0 });
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app)
       .get('/api/v1/client/prestamos')
@@ -104,7 +104,7 @@ describe('GET /api/v1/client/prestamos', () => {
 
   test('lista vacia devuelve pagination correcta (total 0, totalPages 0)', async () => {
     prestamoRepository.listarPrestamosPorCliente.mockResolvedValue({ rows: [], total: 0 });
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/client/prestamos').set('Authorization', bearer(token));
 
@@ -114,7 +114,7 @@ describe('GET /api/v1/client/prestamos', () => {
 
   test('una pagina fuera de rango responde 200 con data vacia, no 404', async () => {
     prestamoRepository.listarPrestamosPorCliente.mockResolvedValue({ rows: [], total: 2 });
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app)
       .get('/api/v1/client/prestamos')
@@ -127,7 +127,7 @@ describe('GET /api/v1/client/prestamos', () => {
   });
 
   test('parametros de query repetidos se rechazan con VALIDATION_ERROR', async () => {
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app)
       .get('/api/v1/client/prestamos?page=1&page=2')
@@ -138,7 +138,7 @@ describe('GET /api/v1/client/prestamos', () => {
   });
 
   test('un token de ADMIN es rechazado en la ruta de cliente (separacion de audiencias)', async () => {
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app).get('/api/v1/client/prestamos').set('Authorization', bearer(token));
 
@@ -151,7 +151,7 @@ describe('GET /api/v1/client/prestamos', () => {
       rows: [filaPrestamoCliente()],
       total: 1
     });
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/client/prestamos').set('Authorization', bearer(token));
 
@@ -170,7 +170,7 @@ describe('GET /api/v1/client/prestamos/:id', () => {
         aval_ingreso_mensual: '0.00'
       })
     );
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/client/prestamos/1').set('Authorization', bearer(token));
 
@@ -191,7 +191,7 @@ describe('GET /api/v1/client/prestamos/:id', () => {
 
   test('aval null cuando el prestamo no tiene aval', async () => {
     prestamoRepository.obtenerPrestamoClientePorId.mockResolvedValue(filaPrestamoCliente({ ...filaAvalAusente() }));
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/client/prestamos/1').set('Authorization', bearer(token));
 
@@ -203,7 +203,7 @@ describe('GET /api/v1/client/prestamos/:id', () => {
     // El repositorio filtra por WHERE id = ? AND cliente_id = ?: si el prestamo es de otro
     // cliente, simplemente no aparece ninguna fila (0 filas), identico a un id inexistente.
     prestamoRepository.obtenerPrestamoClientePorId.mockResolvedValue(null);
-    const token = signClienteToken(OTRO_CLIENTE);
+    const token = signClienteSessionToken(OTRO_CLIENTE);
 
     const res = await request(app).get('/api/v1/client/prestamos/1').set('Authorization', bearer(token));
 
@@ -214,7 +214,7 @@ describe('GET /api/v1/client/prestamos/:id', () => {
 
   test('un id inexistente responde el mismo 404 LOAN_NOT_FOUND', async () => {
     prestamoRepository.obtenerPrestamoClientePorId.mockResolvedValue(null);
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/client/prestamos/999').set('Authorization', bearer(token));
 
@@ -223,7 +223,7 @@ describe('GET /api/v1/client/prestamos/:id', () => {
   });
 
   test('un id invalido (no numerico) se rechaza con VALIDATION_ERROR', async () => {
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/client/prestamos/abc').set('Authorization', bearer(token));
 
@@ -239,7 +239,7 @@ describe('GET /api/v1/admin/prestamos', () => {
 
   test('SUPERADMIN puede listar con filtros combinados', async () => {
     prestamoRepository.listarPrestamosAdmin.mockResolvedValue({ rows: [], total: 0 });
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .get('/api/v1/admin/prestamos')
@@ -263,7 +263,7 @@ describe('GET /api/v1/admin/prestamos', () => {
   test('ANALISTA tambien puede listar', async () => {
     administradorRepository.obtenerActivoPorId.mockResolvedValue({ id: 2, rol: 'ANALISTA', activo: 1 });
     prestamoRepository.listarPrestamosAdmin.mockResolvedValue({ rows: [], total: 0 });
-    const token = signAdminToken(ANALISTA);
+    const token = signAdminSessionToken(ANALISTA);
 
     const res = await request(app).get('/api/v1/admin/prestamos').set('Authorization', bearer(token));
 
@@ -272,7 +272,7 @@ describe('GET /api/v1/admin/prestamos', () => {
 
   test('COBRADOR no tiene acceso (403 FORBIDDEN)', async () => {
     administradorRepository.obtenerActivoPorId.mockResolvedValue({ id: 3, rol: 'COBRADOR', activo: 1 });
-    const token = signAdminToken(COBRADOR);
+    const token = signAdminSessionToken(COBRADOR);
 
     const res = await request(app).get('/api/v1/admin/prestamos').set('Authorization', bearer(token));
 
@@ -281,7 +281,7 @@ describe('GET /api/v1/admin/prestamos', () => {
   });
 
   test('un token de CLIENTE es rechazado en la ruta admin (separacion de audiencias)', async () => {
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/admin/prestamos').set('Authorization', bearer(token));
 
@@ -290,7 +290,7 @@ describe('GET /api/v1/admin/prestamos', () => {
   });
 
   test('fecha_desde posterior a fecha_hasta -> 400 VALIDATION_ERROR', async () => {
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .get('/api/v1/admin/prestamos')
@@ -303,7 +303,7 @@ describe('GET /api/v1/admin/prestamos', () => {
   });
 
   test('fecha invalida -> 400 VALIDATION_ERROR', async () => {
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .get('/api/v1/admin/prestamos')
@@ -316,7 +316,7 @@ describe('GET /api/v1/admin/prestamos', () => {
 
   test('solo fecha_desde: se envia sin fecha_hasta al servicio', async () => {
     prestamoRepository.listarPrestamosAdmin.mockResolvedValue({ rows: [], total: 0 });
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     await request(app)
       .get('/api/v1/admin/prestamos')
@@ -330,7 +330,7 @@ describe('GET /api/v1/admin/prestamos', () => {
 
   test('solo fecha_hasta: se envia sin fecha_desde al servicio', async () => {
     prestamoRepository.listarPrestamosAdmin.mockResolvedValue({ rows: [], total: 0 });
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     await request(app)
       .get('/api/v1/admin/prestamos')
@@ -343,7 +343,7 @@ describe('GET /api/v1/admin/prestamos', () => {
   });
 
   test('query params desconocidos se rechazan (.strict())', async () => {
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .get('/api/v1/admin/prestamos')
@@ -355,7 +355,7 @@ describe('GET /api/v1/admin/prestamos', () => {
   });
 
   test('parametros repetidos (estado duplicado) se rechazan', async () => {
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app)
       .get('/api/v1/admin/prestamos?estado=PENDIENTE&estado=APROBADO')
@@ -377,7 +377,7 @@ describe('GET /api/v1/admin/prestamos', () => {
       ],
       total: 1
     });
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app).get('/api/v1/admin/prestamos').set('Authorization', bearer(token));
 
@@ -400,7 +400,7 @@ describe('GET /api/v1/admin/prestamos/:id', () => {
         aval_ingreso_mensual: '5000.00'
       })
     );
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app).get('/api/v1/admin/prestamos/1').set('Authorization', bearer(token));
 
@@ -423,7 +423,7 @@ describe('GET /api/v1/admin/prestamos/:id', () => {
 
   test('aval null en el detalle cuando el prestamo no tiene aval', async () => {
     prestamoRepository.obtenerPrestamoAdminPorId.mockResolvedValue(filaAdminDetalle());
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app).get('/api/v1/admin/prestamos/1').set('Authorization', bearer(token));
 
@@ -433,7 +433,7 @@ describe('GET /api/v1/admin/prestamos/:id', () => {
 
   test('prestamo inexistente -> 404 LOAN_NOT_FOUND', async () => {
     prestamoRepository.obtenerPrestamoAdminPorId.mockResolvedValue(null);
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app).get('/api/v1/admin/prestamos/999').set('Authorization', bearer(token));
 
@@ -443,7 +443,7 @@ describe('GET /api/v1/admin/prestamos/:id', () => {
 
   test('COBRADOR no tiene acceso al detalle administrativo', async () => {
     administradorRepository.obtenerActivoPorId.mockResolvedValue({ id: 3, rol: 'COBRADOR', activo: 1 });
-    const token = signAdminToken(COBRADOR);
+    const token = signAdminSessionToken(COBRADOR);
 
     const res = await request(app).get('/api/v1/admin/prestamos/1').set('Authorization', bearer(token));
 
@@ -451,7 +451,7 @@ describe('GET /api/v1/admin/prestamos/:id', () => {
   });
 
   test('un token de CLIENTE es rechazado (separacion de audiencias)', async () => {
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/admin/prestamos/1').set('Authorization', bearer(token));
 
@@ -461,7 +461,7 @@ describe('GET /api/v1/admin/prestamos/:id', () => {
 
   test('todos los montos DECIMAL salen como string, nunca number', async () => {
     prestamoRepository.obtenerPrestamoAdminPorId.mockResolvedValue(filaAdminDetalle());
-    const token = signAdminToken(SUPERADMIN);
+    const token = signAdminSessionToken(SUPERADMIN);
 
     const res = await request(app).get('/api/v1/admin/prestamos/1').set('Authorization', bearer(token));
 

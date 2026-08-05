@@ -18,4 +18,13 @@ async function obtenerPorEmail(email) {
   return rows[0] || null;
 }
 
-module.exports = { existePorEmail, crear, obtenerPorEmail };
+// Usado para reconstruir el perfil minimo (id/nombre/email) en las respuestas que
+// completan MFA (mfa/enroll/confirm, mfa/verify, Checkpoint 6B-2 revision): el token
+// pre-MFA/de sesion solo trae `sub`/`email`, nunca `nombre`, asi que ese campo se relee de
+// BD por `id` -- nunca se acepta un `id` que no venga del token ya verificado.
+async function obtenerPorId(id) {
+  const [rows] = await pool.query('SELECT * FROM clientes WHERE id = ?', [id]);
+  return rows[0] || null;
+}
+
+module.exports = { existePorEmail, crear, obtenerPorEmail, obtenerPorId };

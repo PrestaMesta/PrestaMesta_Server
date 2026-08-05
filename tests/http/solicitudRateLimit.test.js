@@ -11,7 +11,7 @@ jest.mock('../../repositories/prestamoRepository');
 const request = require('supertest');
 const { createApp } = require('../../app');
 const prestamoRepository = require('../../repositories/prestamoRepository');
-const { signClienteToken } = require('../../utils/jwt');
+const { signClienteSessionToken } = require('../../utils/jwt');
 
 const app = createApp();
 const CLIENTE = { id: 1, email: 'cliente@example.com' };
@@ -33,7 +33,7 @@ describe('rate limit especifico de POST /prestamos/solicitar', () => {
   });
 
   test('permite hasta SOLICITUD_RATE_LIMIT_MAX solicitudes y bloquea la siguiente con 429', async () => {
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
     const body = { credito_id: 1, monto_solicitado: 1000 };
 
     const primera = await request(app)
@@ -59,7 +59,7 @@ describe('rate limit especifico de POST /prestamos/solicitar', () => {
     // El limite de /solicitar ya se agoto en el test anterior, en el mismo `app`. Una ruta
     // sin ese rate limiter (GET /creditos) debe seguir respondiendo normalmente.
     prestamoRepository.listarCreditos.mockResolvedValue([]);
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
 
     const res = await request(app).get('/api/v1/prestamos/creditos').set('Authorization', `Bearer ${token}`);
 
@@ -67,7 +67,7 @@ describe('rate limit especifico de POST /prestamos/solicitar', () => {
   });
 
   test('la respuesta 429 no filtra detalles internos (mismo envelope de error)', async () => {
-    const token = signClienteToken(CLIENTE);
+    const token = signClienteSessionToken(CLIENTE);
     const body = { credito_id: 1, monto_solicitado: 1000 };
 
     // Ya se consumieron 2 del limite en el primer test de este archivo (mismo `app`); esta
